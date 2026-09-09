@@ -6,6 +6,20 @@ yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
 
+# OS metadata
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+Desktop.ini
+
+# Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
 
@@ -145,11 +159,25 @@ vite.config.ts.timestamp-*
 # Python and private workspace credentials
 __pycache__/
 *.py[cod]
+*.pyd
 .venv/
 venv/
+.coverage
+.coverage.*
+htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+.eggs/
+*.egg-info/
+pip-wheel-metadata/
+build/
+
+# Local OpenCode installation and OpenKapsel credentials
+.opencode/
 .openkapsel.env
 .openkapsel.env.*
 AGENTS.md
