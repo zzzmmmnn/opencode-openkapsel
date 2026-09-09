@@ -1,0 +1,139 @@
+# opencode-openkapsel
+
+Operate an **OpenKapsel remote workspace from OpenCode**: read and edit files,
+run remote Shell tasks, manage Plans, and access the remaining REST interfaces.
+The plugin supplies **OpenKapsel** and **OpenKapsel Read-only** agents.
+
+## Install from GitHub
+
+Requires OpenCode, Node.js 22+, and Python 3.10+. Python must be available as
+`python3` on macOS/Linux or `python` on Windows. Bash is not required by the adapter.
+
+Install globally from GitHub (the same command works in PowerShell, Bash, and
+Zsh):
+
+```sh
+opencode plugin --global github:zzzmmmnn/opencode-openkapsel
+```
+
+Restart OpenCode after installing or upgrading. The plugin adds **OpenKapsel**
+and **OpenKapsel Read-only** without changing the default agent. Select an
+OpenKapsel agent for a remote session; Build and Plan remain available for
+ordinary local work.
+
+execution guard follows each session's selected agent: OpenKapsel agents are
+remote-only, while Build, Plan, and other agents retain their normal tools.
+Conversely, OpenKapsel tools are denied outside the two OpenKapsel agents.
+
+Run the global install command again to update. Remove it with OpenCode's global
+plugin management command when it is no longer needed.
+
+## Connect and use
+
+Give the agent the read-only workspace URL and matching control token. It calls
+`kapsel_config` once, then uses the selected workspace for the current session.
+Example tool arguments (placeholders, not real credentials):
+
+```json
+{
+  "workspace_url": "https://example.com/kapsel/w/READ_TOKEN",
+  "control_token": "CONTROL_TOKEN",
+  "taskname": "website"
+}
+```
+
+New sessions need their own configuration. Resuming a session reuses its private
+credentials and active Plan. Use `force: true` with `kapsel_config` to switch that
+session to a different workspace. Two sessions can connect to different tokens.
+
+| Tools | Purpose |
+|---|---|
+| `kapsel_config`, `kapsel_status` | Connection setup and capability summary |
+| `kapsel_docs` | On-demand reference chapters; start with `overview` |
+| `kapsel_fs_list`, `kapsel_fs_stat`, `kapsel_fs_read` | Remote directory/file reads; `.` means the workspace root |
+| `kapsel_fs_write`, `kapsel_fs_replace` | Remote text creation and editing |
+| `kapsel_shell_exec`, `kapsel_task_output` | Remote Shell execution and incremental output polling |
+| `kapsel_plan_update` | Plan updates and completion with a structured debrief |
+| `kapsel_http` | Remaining REST APIs: directories, recycle bin, batch edits, Memory, sharing, schedules, preview, environment configuration, and other endpoints |
+
+Put endpoint-specific request fields inside the `json` object of `kapsel_http`.
+It accepts workspace-relative endpoints and same-origin absolute transfer-ticket
+URLs. It cannot run the CLI options or upload arbitrary host files. Binary file
+transfers and continuous SSE are not exposed as host streaming tools; use the
+documented remote APIs and output polling as applicable.
+
+Each approved recorded mutation gets `plan_id`, `taskname` (up to 32 characters),
+and `message` (up to 200 characters). The first mutation creates a new session
+Plan if none was specified. It does not adopt another agent's open Plan. Context
+management requests use their own attribution fields. Completing or cancelling
+the current Plan clears the active Plan so the next task gets a new one.
+
+## Permissions and data
+
+| Area | Behavior |
+|---|---|
+| **OpenKapsel** | Remote mutations allowed by the agent policy; server token grants still apply |
+| **OpenKapsel Read-only** | Reads run normally; mutations call OpenCode's `kapsel_write` approval before any Plan creation or write. Denying approval prevents the request |
+| Local tools | File, Shell, search, skill discovery, code execution, delegation, and unknown/MCP tools are blocked by an exact-name execution guard |
+| Other allowed tools | OpenCode question and todo tools |
+| Host access | A fixed Python helper reads/writes private session state and sends HTTP requests. It starts with `shell: false`, isolated Python imports, and JSON on stdin |
+| External service | The user-selected OpenKapsel server receives requested file contents, commands and API data |
+| Credential renewal | Under two days remaining, the upstream helper renews credentials and saves replacements. Calls within a session are serialized to avoid renewal races |
+| Credentials in output | Stored tokens and capability URLs are redacted from helper results and errors |
+| Conversation history | URL/token supplied to `kapsel_config` remain tool inputs: OpenCode and the model provider may retain them. Output redaction does not erase the conversation |
+| Filesystem protection | Unix state directories use `0700`, files `0600`. Windows uses the user directory's inherited ACLs |
+
+State lives in `$XDG_STATE_HOME/opencode-openkapsel/<sha256-session-id>/`, or
+`~/.local/state/opencode-openkapsel/<sha256-session-id>/` when unset. Each session
+contains `.openkapsel.env` and `session.json`. Neither belongs in a project repo.
+Keep one OpenCode process responsible for a given session's credential file.
+
+The guard limits **model-issued tool calls**. It is not an OS sandbox for the
+OpenCode process, user-entered terminal commands, other trusted plugins, or
+OpenCode's own startup/context discovery. Use an empty dedicated local directory;
+OpenCode can still load its local configuration and instructions independently
+of tools. A user with control of the host/configuration can change this setup.
+Remote security remains enforced by OpenKapsel and the token's grants.
+
+Typed tools improve call accuracy; generic `kapsel_http` is intentionally broad
+and is not an additional endpoint authorization layer. It checks HTTP mutation
+methods, so custom backend authors must not put state-changing actions in GET
+routes. Automatic credential renewal can happen during reads as well.
+
+## Compatibility and development
+
+The adapter targets the OpenCode 1.x plugin API and pins its SDK to `1.18.21`.
+OpenCode V2's different configuration API is not claimed compatible.
+
+| Platform | Verification |
+|---|---|
+| macOS | Passed Node/Python integration tests and real OpenCode 1.18.21 execution with mock inference: configuration, remote Shell, automatic Plan creation, and attempted local-tool rejection |
+| Linux / Windows | CI matrix provided; platform results require the workflow to run |
+| Runtimes | CI covers Node 22/24 and Python 3.10/3.14; helpers use Python's standard library |
+
+```sh
+npm ci --ignore-scripts
+npm test
+npm pack --dry-run
+```
+
+The optional runtime test starts a real installed OpenCode with temporary user
+directories and local mock model/workspace servers. No paid model or server
+credentials are needed:
+
+```sh
+# Bash/Zsh
+OPENKAPSEL_RUNTIME_TEST=1 node --test tests/runtime.test.js
+```
+
+```powershell
+# PowerShell
+$env:OPENKAPSEL_RUNTIME_TEST = "1"
+node --test tests/runtime.test.js
+```
+
+`vendor/openkapsel-rest` is an unchanged snapshot of the OpenKapsel project's
+client and reference documentation; [upstream provenance](vendor/UPSTREAM.md)
+records the revision. Maintain the protocol there and update this snapshot.
+
+MIT licensed. Independent community integration, not an official OpenCode product.
