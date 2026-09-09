@@ -8,6 +8,12 @@ import sys
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, build_opener, install_opener
 
+# Pipes must have the same encoding on every host. In particular, Windows may
+# otherwise decode Node's UTF-8 JSON stdin with its active legacy code page.
+sys.stdin.reconfigure(encoding='utf-8', errors='strict')
+sys.stdout.reconfigure(encoding='utf-8', errors='strict')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'vendor/openkapsel-rest/scripts'))
 import openkapsel_config as config
 import openkapsel_http as http

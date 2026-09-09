@@ -53,6 +53,13 @@ test('endpoint traversal, scheme and control character checks', () => {
   assert.equal(validateEndpoint('fs/list'), 'fs/list');
 });
 
+test('Python helper transport explicitly uses UTF-8 on every platform', async () => {
+  const source = await readFile(new URL('../lib/transport.js', import.meta.url), 'utf8');
+  const runner = await readFile(new URL('../lib/runner.py', import.meta.url), 'utf8');
+  assert.match(source, /'-X', 'utf8'/);
+  assert.match(runner, /sys\.stdin\.reconfigure\(encoding='utf-8', errors='strict'\)/);
+});
+
 test('denied writes do not create Plans or invoke remote requests', async (t) => {
   let calls = 0;
   const tools = createTools({ stateRoot: await temp(t), transport: async () => { calls++; } });
