@@ -52,7 +52,8 @@ def main():
             args = [payload['method'], endpoint, '--env-file', str(credential_file), '--auth', 'control']
             for key, value in payload.get('query', {}).items():
                 if value is not None:
-                    args.extend(['--query', f'{key}={str(value).lower() if isinstance(value, bool) else value}'])
+                    for item in value if isinstance(value, list) else [value]:
+                        args.extend(['--query', f'{key}={str(item).lower() if isinstance(item, bool) else item}'])
             if 'json' in payload:
                 args.extend(['--json', json.dumps(payload['json'])])
             for key in ('plan_id', 'taskname', 'message'):

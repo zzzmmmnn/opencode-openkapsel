@@ -72,6 +72,24 @@ test('denied writes do not create Plans or invoke remote requests', async (t) =>
   assert.equal(calls, 0);
 });
 
+test('read RPCs bypass mutation approval, not write authorization', async (t) => {
+  const calls = [];
+  const tools = createTools({ stateRoot: await temp(t), transport: async payload => { calls.push(payload); return { ok: true }; } });
+  const ctx = { ...context('rpc-readonly', async () => { throw new Error('approval denied'); }), agent: READONLY_AGENT };
+  for (const [name, args] of [
+    ['kapsel_git', { action: 'status' }], ['kapsel_fs_read_many', { paths: ['a'] }],
+    ['kapsel_fs_manifest', { recursive: true }],
+    ['kapsel_fs_search', { query: 'text', include: ['*.py', '*.js'] }],
+    ['kapsel_http', { method: 'POST', endpoint: 'fs/read_many', json: { paths: ['a'] } }],
+    ['kapsel_http', { method: 'POST', endpoint: 'fs/manifest', json: { items: [{ path: 'a' }] } }],
+  ]) await tools[name].execute(args, ctx);
+  assert.equal(calls.length, 6);
+  assert.ok(calls.every(c => !c.plan_id && c.endpoint !== 'context'));
+  assert.deepEqual(calls[3].query.include, ['*.py', '*.js']);
+  await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read_many/../write', json: {} }, ctx));
+  assert.equal(calls.length, 6);
+});
+
 test('client mapping tools route reads, mutations, and task controls through the approved bridge', async (t) => {
   const calls = [];
   let approvals = 0;
@@ -203,6 +221,9 @@ test('Python transport exercises real HTTP, dot paths, attribution, unicode and 
   const configured = await tools.kapsel_config.execute({ workspace_url: url, control_token: 'test_control' }, context());
   assert.doesNotMatch(configured, /test_read|test_control/);
   await tools.kapsel_fs_list.execute({ path: '.' }, context());
+  await tools.kapsel_fs_search.execute({ query: 'x', include: ['*.py', '*.js'] }, context());
+  const search = calls.find(c => c.url.includes('/fs/search'));
+  assert.deepEqual(new URL(search.url, url).searchParams.getAll('include'), ['*.py', '*.js']);
   assert.ok(calls.some(c => c.url.includes('path=.')));
   const command = "printf '你好'\n$(touch SHOULD_NEVER_RUN) `echo bad` \\ $HOME \u0000";
   await tools.kapsel_shell_exec.execute({ command }, context());

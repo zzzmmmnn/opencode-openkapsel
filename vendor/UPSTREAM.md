@@ -1,7 +1,8 @@
 # Upstream REST helpers
 
 `openkapsel-rest/` is vendored unchanged from `zzzmmmnn/OpenKapsel`, commit
-`c34a2537999d00fe89831ce1708bc055b7e43d37`, directory `skills/openkapsel-rest`.
+`1de0bf52a24c85bd9adee83ad12d75934bfd6e58` (OpenKapsel 1.57.0), directory `skills/openkapsel-rest`
+(excluding the Codex-specific `agents/` metadata).
 The upstream project is the authoritative source for this REST contract and
 Python client. Update the snapshot together; do not fork the protocol here.
 
