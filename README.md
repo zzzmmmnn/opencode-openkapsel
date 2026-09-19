@@ -52,6 +52,10 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_docs` | On-demand reference chapters; start with `overview` |
 | `kapsel_fs_list`, `kapsel_fs_stat`, `kapsel_fs_read` | Remote directory/file reads; `.` means the workspace root |
 | `kapsel_fs_write`, `kapsel_fs_replace` | Remote text creation and editing |
+| `kapsel_mappings` | Client-backed directories, connection state, and execution capabilities |
+| `kapsel_fs_copy`, `kapsel_fs_move`, `kapsel_transfer` | Cross-root file copy/move and asynchronous transfer control |
+| `kapsel_recycle` | List, restore, or explicitly purge entries in a selected recycle root |
+| `kapsel_client_task` | List, start, inspect, feed stdin to, interrupt, or kill a client-side process |
 | `kapsel_shell_exec`, `kapsel_task_output` | Remote Shell execution and incremental output polling |
 | `kapsel_plan_update` | Plan updates and completion with a structured debrief |
 | `kapsel_http` | Remaining REST APIs: directories, recycle bin, batch edits, Memory, sharing, schedules, preview, environment configuration, and other endpoints |
@@ -61,6 +65,14 @@ It accepts workspace-relative endpoints and same-origin absolute transfer-ticket
 URLs. It cannot run the CLI options or upload arbitrary host files. Binary file
 transfers and continuous SSE are not exposed as host streaming tools; use the
 documented remote APIs and output polling as applicable.
+
+For mapped directories, call `kapsel_mappings` first. Client tasks use an
+`argv` array and an export-relative `cwd`; they run on that client, not in the
+server Shell. Inspect the advertised sandbox mode before execution:
+`native-unsandboxed` has the client OS account's permissions. Task output is
+base64-encoded with a `next_offset` cursor. Mutating actions use the same
+OpenCode approval and Plan attribution as other remote writes. See
+`kapsel_docs` with topic `mappings` for transfer and recycle failure states.
 
 Each approved recorded mutation gets `plan_id`, `taskname` (up to 32 characters),
 and `message` (up to 200 characters). The first mutation creates a new session

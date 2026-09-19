@@ -1,6 +1,6 @@
 {
   "name": "opencode-openkapsel",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Remote OpenKapsel workspace tools and a remote-only agent for OpenCode.",
   "type": "module",
   "main": "index.js",
