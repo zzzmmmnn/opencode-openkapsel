@@ -44,6 +44,7 @@ test('schemas reject string JSON and docs path traversal', async () => {
   assert.equal(tool.schema.object(hooks.tool.kapsel_http.args).safeParse({ method: 'PATCH', endpoint: 'context/plans/1', json: '' }).success, false);
   await assert.rejects(hooks.tool.kapsel_docs.execute({ topic: '../../etc/passwd' }, context()), /Unknown/);
   assert.match(await hooks.tool.kapsel_docs.execute({ topic: 'files' }, context()), /fs/);
+  assert.match(await hooks.tool.kapsel_docs.execute({ topic: 'mappings' }, context()), /Client-backed directories/);
 });
 
 test('endpoint traversal, scheme and control character checks', () => {
@@ -69,6 +70,91 @@ test('denied writes do not create Plans or invoke remote requests', async (t) =>
     ['kapsel_http', { method: 'POST', endpoint: 'context', json: { type: 'plan' } }],
   ]) await assert.rejects(tools[name].execute(args, ctx), /approval denied/);
   assert.equal(calls, 0);
+});
+
+test('client mapping tools route reads, mutations, and task controls through the approved bridge', async (t) => {
+  const calls = [];
+  let approvals = 0;
+  const transport = async (payload) => {
+    calls.push(payload);
+    if (payload.endpoint === 'context') return { id: 7 };
+    return { ok: true, id: 'transfer-id' };
+  };
+  const tools = createTools({ stateRoot: await temp(t), transport });
+  const ctx = context('mapping-session', async () => { approvals++; });
+  const mappingId = 'abcdefghijklmnopqrstuvwx';
+  const taskId = 'client-task-1234';
+  const mutation = { taskname: 'mapping', message: 'test mapped storage' };
+
+  await tools.kapsel_mappings.execute({}, ctx);
+  assert.equal(calls.at(-1).endpoint, 'mappings');
+  assert.equal(calls.at(-1).method, 'GET');
+  await tools.kapsel_fs_copy.execute({ source: 'file.txt', destination: 'laptop/file.txt', ...mutation }, ctx);
+  assert.deepEqual(calls.at(-1).json, { source: 'file.txt', destination: 'laptop/file.txt' });
+  assert.equal(calls.at(-1).endpoint, 'fs/copy');
+  assert.equal(calls.at(-1).plan_id, 7);
+  assert.equal(calls.at(-1).taskname, 'mapping');
+  assert.equal(calls.at(-1).message, 'test mapped storage');
+  await tools.kapsel_fs_move.execute({ source: 'laptop/file.txt', destination: 'file.txt' }, ctx);
+  assert.equal(calls.at(-1).endpoint, 'fs/move');
+  assert.equal(calls.at(-1).plan_id, 7);
+
+  await tools.kapsel_transfer.execute({ transfer_id: 'transfer-id', action: 'status' }, ctx);
+  assert.equal(calls.at(-1).method, 'GET');
+  assert.equal(calls.at(-1).endpoint, 'fs/transfers/transfer-id');
+  for (const action of ['cancel', 'resume']) {
+    await tools.kapsel_transfer.execute({ transfer_id: 'transfer-id', action }, ctx);
+    assert.equal(calls.at(-1).method, 'POST');
+    assert.equal(calls.at(-1).endpoint, `fs/transfers/transfer-id/${action}`);
+  }
+  await tools.kapsel_recycle.execute({ action: 'list', root: 'laptop', offset: 2, limit: 10 }, ctx);
+  assert.deepEqual(calls.at(-1).query, { root: 'laptop', offset: 2, limit: 10 });
+  await tools.kapsel_recycle.execute({ action: 'restore', root: 'laptop', recycle_id: 'recycle-1' }, ctx);
+  assert.equal(calls.at(-1).endpoint, 'recycle/restore');
+  assert.equal(calls.at(-1).json.root, 'laptop');
+  const beforeUnconfirmedPurge = calls.length;
+  await assert.rejects(tools.kapsel_recycle.execute({ action: 'purge', recycle_id: 'recycle-1' }, ctx), /confirm=true/);
+  assert.equal(calls.length, beforeUnconfirmedPurge);
+  await tools.kapsel_recycle.execute({ action: 'purge', root: 'laptop', recycle_id: 'recycle-1', confirm: true }, ctx);
+  assert.equal(calls.at(-1).endpoint, 'recycle/purge');
+  assert.equal(calls.at(-1).json.confirm, true);
+
+  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'list' }, ctx);
+  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/tasks`);
+  assert.equal(calls.at(-1).method, 'GET');
+  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'start', argv: ['python3', '-V'], cwd: '.' }, ctx);
+  assert.deepEqual(calls.at(-1).json, { argv: ['python3', '-V'], cwd: '.' });
+  assert.equal(calls.at(-1).method, 'POST');
+  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'status', task_id: taskId, offset: 4 }, ctx);
+  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/tasks/${taskId}`);
+  assert.deepEqual(calls.at(-1).query, { offset: 4 });
+  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'stdin', task_id: taskId, stdin_text: 'héllo' }, ctx);
+  assert.equal(calls.at(-1).json.data, Buffer.from('héllo').toString('base64'));
+  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'stdin', task_id: taskId, eof: true }, ctx);
+  assert.equal(calls.at(-1).json.eof, true);
+  for (const action of ['interrupt', 'kill']) {
+    await tools.kapsel_client_task.execute({ mapping_id: mappingId, action, task_id: taskId }, ctx);
+    assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/tasks/${taskId}/${action}`);
+  }
+  assert.equal(calls.filter(call => call.endpoint === 'context').length, 1);
+  assert.equal(approvals, calls.filter(call => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(call.method)).length - 1);
+});
+
+test('read-only agent denies client mapping mutations before Plan creation or HTTP', async (t) => {
+  const calls = [];
+  const tools = createTools({ stateRoot: await temp(t), transport: async payload => { calls.push(payload); return { ok: true }; } });
+  const denied = { ...context('mapping-readonly', async () => { throw new Error('approval denied'); }), agent: READONLY_AGENT };
+  for (const [name, args] of [
+    ['kapsel_fs_copy', { source: 'a', destination: 'laptop/a' }],
+    ['kapsel_fs_move', { source: 'a', destination: 'laptop/a' }],
+    ['kapsel_transfer', { transfer_id: 'transfer-id', action: 'cancel' }],
+    ['kapsel_recycle', { action: 'purge', recycle_id: 'x', confirm: true }],
+    ['kapsel_client_task', { mapping_id: 'abcdefghijklmnopqrstuvwx', action: 'start', argv: ['python3'] }],
+  ]) await assert.rejects(tools[name].execute(args, denied), /approval denied/);
+  assert.equal(calls.length, 0);
+  await tools.kapsel_mappings.execute({}, denied);
+  await tools.kapsel_recycle.execute({ action: 'list' }, denied);
+  assert.deepEqual(calls.map(call => call.method), ['GET', 'GET']);
 });
 
 test('session Plans persist, remain isolated, and concurrent writes create only one Plan', async (t) => {
