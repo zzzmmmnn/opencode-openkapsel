@@ -86,6 +86,7 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
           description: 'Inspect one integer.',
           input_schema: { type: 'object', properties: { value: { type: 'integer' } }, required: ['value'], additionalProperties: false },
           write: false,
+          execution: 'sync',
         } },
       } } },
     }] };
@@ -115,6 +116,43 @@ test('client mapping tools route reads, mutations, and task controls through the
   const transport = async (payload) => {
     calls.push(payload);
     if (payload.endpoint === 'context') return { id: 7 };
+    if (payload.endpoint === 'mappings/abcdefghijklmnopqrstuvwx/rpc/vendor/task_update') {
+      return {
+        task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234',
+        kind: 'rpc',
+        rpc_family: 'vendor',
+        rpc_operation: 'task_update',
+        execution: 'task',
+        status: 'running',
+      };
+    }
+    if (payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234') {
+      return {
+        task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234',
+        kind: 'rpc',
+        rpc_family: 'vendor',
+        rpc_operation: 'task_update',
+        execution: 'task',
+        status: 'running',
+      };
+    }
+    if (payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234/output') {
+      return {
+        task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234',
+        kind: 'rpc',
+        rpc_family: 'vendor',
+        rpc_operation: 'task_update',
+        execution: 'task',
+        status: 'running',
+        finished: false,
+        stdout: { data: 'progress\n', next_offset: 9, available_end: 9, gap: false },
+        stderr: { data: '', next_offset: 0, available_end: 0, gap: false },
+      };
+    }
+    if (
+      payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234/interrupt'
+      || payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234/kill'
+    ) return { task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234', kind: 'rpc', status: 'running' };
     if (payload.endpoint === 'mappings') return { mappings: [{
       id: 'abcdefghijklmnopqrstuvwx',
       name: 'laptop',
@@ -122,7 +160,7 @@ test('client mapping tools route reads, mutations, and task controls through the
       capabilities: { rpc: { vendor: {
         state: 'available', version: 1, read_only: false,
         description: 'Inspect or update vendor metadata.',
-        operations: ['inspect', 'update'],
+        operations: ['inspect', 'update', 'task_update'],
         operation_specs: {
           inspect: {
             description: 'Inspect one integer.',
@@ -131,6 +169,7 @@ test('client mapping tools route reads, mutations, and task controls through the
               required: ['value'], additionalProperties: false,
             },
             write: false,
+            execution: 'sync',
           },
           update: {
             description: 'Update one integer.',
@@ -139,6 +178,16 @@ test('client mapping tools route reads, mutations, and task controls through the
               required: ['value'], additionalProperties: false,
             },
             write: true,
+            execution: 'sync',
+          },
+          task_update: {
+            description: 'Update one integer asynchronously.',
+            input_schema: {
+              type: 'object', properties: { value: { type: 'integer' } },
+              required: ['value'], additionalProperties: false,
+            },
+            write: true,
+            execution: 'task',
           },
         },
       } } },
@@ -176,6 +225,50 @@ test('client mapping tools route reads, mutations, and task controls through the
   assert.equal(calls.at(-1).taskname, 'mapping');
   assert.equal(calls.at(-1).message, 'update vendor metadata');
   assert.equal(approvals, approvalsBeforeRpcWrite + 1);
+
+  const taskRpc = JSON.parse(await tools.kapsel_rpc.execute({
+    mapping_id: mappingId,
+    family: 'vendor',
+    operation: 'task_update',
+    args: { value: 3 },
+    timeout_seconds: 120,
+    taskname: 'mapping',
+    message: 'update vendor metadata asynchronously',
+  }, ctx));
+  assert.equal(taskRpc.kind, 'rpc');
+  assert.equal(taskRpc.execution, 'task');
+  assert.equal(taskRpc.task_id, 'client.' + mappingId + '.rpc-task-1234');
+  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/rpc/vendor/task_update`);
+  assert.deepEqual(calls.at(-1).json, { args: { value: 3 }, timeout_seconds: 120 });
+  assert.equal(calls.at(-1).plan_id, 7);
+  assert.equal(calls.at(-1).taskname, 'mapping');
+  assert.equal(calls.at(-1).message, 'update vendor metadata asynchronously');
+  assert.equal(approvals, approvalsBeforeRpcWrite + 2);
+
+  const rpcStatus = JSON.parse(await tools.kapsel_client_task.execute({
+    mapping_id: mappingId, action: 'status', task_id: taskRpc.task_id,
+  }, ctx));
+  assert.equal(rpcStatus.kind, 'rpc');
+  assert.equal(rpcStatus.rpc_operation, 'task_update');
+  assert.equal(calls.at(-1).endpoint, `tasks/${taskRpc.task_id}`);
+
+  const rpcOutput = JSON.parse(await tools.kapsel_task_output.execute({
+    task_id: taskRpc.task_id, stdout_offset: 0,
+  }, ctx));
+  assert.equal(rpcOutput.kind, 'rpc');
+  assert.equal(rpcOutput.stdout.data, 'progress\n');
+  assert.equal(calls.at(-1).endpoint, `tasks/${taskRpc.task_id}/output`);
+
+  for (const action of ['interrupt', 'kill']) {
+    await tools.kapsel_client_task.execute({
+      mapping_id: mappingId,
+      action,
+      task_id: taskRpc.task_id,
+      taskname: 'mapping',
+      message: action + ' rpc task',
+    }, ctx);
+    assert.equal(calls.at(-1).endpoint, `tasks/${taskRpc.task_id}/${action}`);
+  }
 
   await tools.kapsel_fs_copy.execute({ source: 'file.txt', destination: 'laptop/file.txt', ...mutation }, ctx);
   assert.deepEqual(calls.at(-1).json, { source: 'file.txt', destination: 'laptop/file.txt' });
@@ -246,6 +339,7 @@ test('read-only agent denies client mapping mutations before Plan creation or HT
           description: 'Update one integer.',
           input_schema: { type: 'object', properties: { value: { type: 'integer' } }, required: ['value'], additionalProperties: false },
           write: true,
+          execution: 'sync',
         } },
       } } },
     }] };

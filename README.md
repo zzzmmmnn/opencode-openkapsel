@@ -54,10 +54,10 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_fs_write`, `kapsel_fs_replace` | Remote text creation and editing |
 | `kapsel_mappings` | Client-backed directories, connection state, and advertised execution/RPC capabilities |
 | `kapsel_archive` | Browse ZIP/tar archives or read bounded members without extracting; mapped archives use client RPC |
-| `kapsel_rpc` | Unified dynamic mapping RPC entry: inspect `kapsel_mappings` for each operation's schema and `write` flag; reads run directly, writes use OpenCode approval + Plan/Context and require a writable mapping |
+| `kapsel_rpc` | Unified dynamic mapping RPC entry: inspect each operation's schema, `write`, and `execution`; sync returns directly, task returns a persistent client task id; writes use OpenCode approval + Plan/Context and require a writable mapping |
 | `kapsel_fs_copy`, `kapsel_fs_move`, `kapsel_transfer` | Cross-root file copy/move and asynchronous transfer control |
 | `kapsel_recycle` | List, restore, or explicitly purge entries in a selected recycle root |
-| `kapsel_client_task` | List, start, inspect, feed stdin to, interrupt, or kill a client-side process |
+| `kapsel_client_task` | List/start legacy client Shell tasks and inspect/interrupt/kill unified client task ids returned by `kapsel_rpc`/`kapsel_shell_exec`; RPC tasks do not accept stdin |
 | `kapsel_shell_exec`, `kapsel_task_output` | Server or mapped-client Shell execution and incremental output polling |
 | `kapsel_plan_update` | Plan updates and completion with a structured debrief |
 | `kapsel_http` | Remaining REST APIs: directories, recycle bin, batch edits, Memory, sharing, schedules, preview, environment configuration, and other endpoints |
@@ -166,18 +166,23 @@ MIT licensed. Independent community integration, not an official OpenCode produc
 
 Version 0.3.0 adds `kapsel_git` (status/diff/diff_stat/log/show/ls_files),
 `kapsel_fs_read_many`, `kapsel_fs_manifest`, and `kapsel_fs_search`.
-Requires OpenKapsel 1.57.0 for this contract. Git queries are read-only and
-independent of Shell/client execution permission, including read-only mappings.
-Git uses bounded sanitized local snapshots; inspect the shell reference for
-supported repository layouts, local disk overhead, and limits. There is no Git
-task/polling API. `kapsel_rpc` is the single dynamic mapping-RPC entry point:
-`kapsel_mappings` publishes each family description plus each operation's
-`description`, JSON `input_schema`, and boolean `write`, so adding future
-`doc`, `csv`, `sqlite`, or other client plugins does not require an OpenCode
-plugin update. `write=false` operations run as reads. `write=true` operations
-use the same OpenCode approval and OpenKapsel Plan/Context flow as other mutations
-and also require the mapping to be administratively writable. `kapsel_archive`
-remains a convenience tool that also works for server-local archives.
+Requires OpenKapsel with RPC-plugin task support (commit `95392b5` or a later
+release) for this contract. Git read operations remain independent of
+Shell/client execution permission and use bounded sanitized snapshots. Git
+`add`, `commit`, `restore`, and `checkout` are advertised as
+`write=true, execution=task`; Archive `create` and `extract` use the same
+persistent task model. `kapsel_rpc` is the single dynamic mapping-RPC entry
+point: `kapsel_mappings` publishes each family description plus each operation's
+`description`, JSON `input_schema`, boolean `write`, and `execution`
+(`sync` or `task`). A task operation returns a unified
+`client.<mapping>.<task>` id immediately; poll it with `kapsel_task_output`
+or inspect/control it with `kapsel_client_task`. The task survives provider
+disconnect/reconnect while the client process stays alive. Never replay an
+uncertain write-task start; reconnect and query/list the returned or candidate
+task id instead. `write=true` still uses OpenCode approval plus OpenKapsel
+Plan/Context and requires the mapping to be administratively writable.
+`kapsel_archive` remains a read-preview convenience tool for local or mapped
+archives; Archive create/extract use `kapsel_rpc`.
 
 The generic HTTP tool recognizes POST `fs/read_many` and `fs/manifest` as
 read-only. For `mappings/<24-char-id>/rpc/<family>/<operation>`, it consults
