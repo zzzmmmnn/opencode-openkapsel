@@ -82,12 +82,15 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
     ['kapsel_fs_search', { query: 'text', include: ['*.py', '*.js'] }],
     ['kapsel_http', { method: 'POST', endpoint: 'fs/read_many', json: { paths: ['a'] } }],
     ['kapsel_http', { method: 'POST', endpoint: 'fs/manifest', json: { items: [{ path: 'a' }] } }],
+    ['kapsel_archive', { action: 'list', path: 'laptop/sample.zip' }],
+    ['kapsel_mapping_rpc', { mapping_id: 'abcdefghijklmnopqrstuvwx', family: 'vendor', operation: 'inspect', args: { value: 7 } }],
+    ['kapsel_http', { method: 'POST', endpoint: 'mappings/abcdefghijklmnopqrstuvwx/rpc/vendor/inspect', json: { args: { value: 8 } } }],
   ]) await tools[name].execute(args, ctx);
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 9);
   assert.ok(calls.every(c => !c.plan_id && c.endpoint !== 'context'));
   assert.deepEqual(calls[3].query.include, ['*.py', '*.js']);
   await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read_many/../write', json: {} }, ctx));
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 9);
 });
 
 test('client mapping tools route reads, mutations, and task controls through the approved bridge', async (t) => {
