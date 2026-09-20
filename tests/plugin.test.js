@@ -188,6 +188,9 @@ test('session Plans persist, remain isolated, and concurrent writes create only 
   await Promise.all([1, 2].map(() => tools.kapsel_shell_exec.execute({ command: 'ls', message: 'Inspect' }, context())));
   assert.equal(calls.filter(c => c.payload.endpoint === 'context').length, 1);
   const resumed = createTools({ stateRoot, transport });
+  await tools.kapsel_shell_exec.execute({ command: 'echo client', cwd: 'laptop/project', target: 'client' }, context());
+  assert.equal(calls.at(-1).payload.json.target, 'client');
+  assert.equal(calls.at(-1).payload.json.cwd, 'laptop/project');
   await resumed.kapsel_fs_write.execute({ path: 'x', content: 'abc' }, context());
   assert.equal(calls.at(-1).payload.plan_id, 1);
   assert.equal(calls.at(-1).payload.taskname, 'opencode');
@@ -228,6 +231,7 @@ test('Python transport exercises real HTTP, dot paths, attribution, unicode and 
   const command = "printf '你好'\n$(touch SHOULD_NEVER_RUN) `echo bad` \\ $HOME \u0000";
   await tools.kapsel_shell_exec.execute({ command }, context());
   assert.equal(calls.at(-1).body.command, command);
+  assert.equal(calls.at(-1).body.target, 'auto');
   assert.equal(calls.at(-1).body.plan_id, 42);
   assert.equal(calls.at(-1).body.taskname, 'opencode');
   assert.equal(calls.at(-1).auth, 'Bearer test_control');

@@ -56,7 +56,7 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_fs_copy`, `kapsel_fs_move`, `kapsel_transfer` | Cross-root file copy/move and asynchronous transfer control |
 | `kapsel_recycle` | List, restore, or explicitly purge entries in a selected recycle root |
 | `kapsel_client_task` | List, start, inspect, feed stdin to, interrupt, or kill a client-side process |
-| `kapsel_shell_exec`, `kapsel_task_output` | Remote Shell execution and incremental output polling |
+| `kapsel_shell_exec`, `kapsel_task_output` | Server or mapped-client Shell execution and incremental output polling |
 | `kapsel_plan_update` | Plan updates and completion with a structured debrief |
 | `kapsel_http` | Remaining REST APIs: directories, recycle bin, batch edits, Memory, sharing, schedules, preview, environment configuration, and other endpoints |
 
@@ -73,6 +73,16 @@ server Shell. Inspect the advertised sandbox mode before execution:
 base64-encoded with a `next_offset` cursor. Mutating actions use the same
 OpenCode approval and Plan attribution as other remote writes. See
 `kapsel_docs` with topic `mappings` for transfer and recycle failure states.
+
+`kapsel_shell_exec` accepts `target: "auto"` (default), `"server"`, or
+`"client"`. Auto selects a client when `cwd` is inside its mapping (such as
+`laptop/project`); another cwd selects the server. An offline or denied client
+fails without server fallback. A client needs OpenKapsel 1.60.0+ and a writable
+execution-enabled mapping. Its platform, sandbox, and limits apply; server
+`/env` is not injected. `kapsel_task_output` accepts either task location's ID;
+client stdout/stderr are combined in stdout. The ordinary `/tasks` control APIs
+remain available through `kapsel_http` (client stdin: at most 16 KiB per call).
+Use `kapsel_client_task` for literal client `argv` arrays.
 
 Each approved recorded mutation gets `plan_id`, `taskname` (up to 32 characters),
 and `message` (up to 200 characters). The first mutation creates a new session
@@ -168,7 +178,7 @@ The vendored REST skill is synchronized with the main OpenKapsel project.
 
 ## Client reconnects and portable text
 
-The bundled REST references track OpenKapsel 1.59.0. Reconnect persistence needs
+The bundled REST references track OpenKapsel 1.60.1. Reconnect persistence needs
 client 1.58.0+; explicit text codecs and literal newline handling need server
 1.59.0+ and client file API v3 for direct mapped RPC.
 
