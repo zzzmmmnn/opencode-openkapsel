@@ -82,12 +82,15 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
     ['kapsel_fs_search', { query: 'text', include: ['*.py', '*.js'] }],
     ['kapsel_http', { method: 'POST', endpoint: 'fs/read_many', json: { paths: ['a'] } }],
     ['kapsel_http', { method: 'POST', endpoint: 'fs/manifest', json: { items: [{ path: 'a' }] } }],
+    ['kapsel_archive', { action: 'list', path: 'laptop/sample.zip' }],
+    ['kapsel_rpc', { mapping_id: 'abcdefghijklmnopqrstuvwx', family: 'vendor', operation: 'inspect', args: { value: 7 } }],
+    ['kapsel_http', { method: 'POST', endpoint: 'mappings/abcdefghijklmnopqrstuvwx/rpc/vendor/inspect', json: { args: { value: 8 } } }],
   ]) await tools[name].execute(args, ctx);
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 9);
   assert.ok(calls.every(c => !c.plan_id && c.endpoint !== 'context'));
   assert.deepEqual(calls[3].query.include, ['*.py', '*.js']);
   await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read_many/../write', json: {} }, ctx));
-  assert.equal(calls.length, 6);
+  assert.equal(calls.length, 9);
 });
 
 test('client mapping tools route reads, mutations, and task controls through the approved bridge', async (t) => {
@@ -96,6 +99,22 @@ test('client mapping tools route reads, mutations, and task controls through the
   const transport = async (payload) => {
     calls.push(payload);
     if (payload.endpoint === 'context') return { id: 7 };
+    if (payload.endpoint === 'mappings') return { mappings: [{
+      id: 'abcdefghijklmnopqrstuvwx',
+      name: 'laptop',
+      capabilities: { rpc: { vendor: {
+        state: 'available', version: 1, read_only: true,
+        description: 'Inspect vendor metadata.',
+        operations: ['inspect'],
+        operation_specs: { inspect: {
+          description: 'Inspect one integer.',
+          input_schema: {
+            type: 'object', properties: { value: { type: 'integer' } },
+            required: ['value'], additionalProperties: false,
+          },
+        } },
+      } } },
+    }] };
     return { ok: true, id: 'transfer-id' };
   };
   const tools = createTools({ stateRoot: await temp(t), transport });
@@ -104,9 +123,14 @@ test('client mapping tools route reads, mutations, and task controls through the
   const taskId = 'client-task-1234';
   const mutation = { taskname: 'mapping', message: 'test mapped storage' };
 
-  await tools.kapsel_mappings.execute({}, ctx);
+  const mappings = JSON.parse(await tools.kapsel_mappings.execute({}, ctx));
   assert.equal(calls.at(-1).endpoint, 'mappings');
   assert.equal(calls.at(-1).method, 'GET');
+  assert.equal(mappings.mappings[0].capabilities.rpc.vendor.description, 'Inspect vendor metadata.');
+  assert.equal(
+    mappings.mappings[0].capabilities.rpc.vendor.operation_specs.inspect.input_schema.properties.value.type,
+    'integer',
+  );
   await tools.kapsel_fs_copy.execute({ source: 'file.txt', destination: 'laptop/file.txt', ...mutation }, ctx);
   assert.deepEqual(calls.at(-1).json, { source: 'file.txt', destination: 'laptop/file.txt' });
   assert.equal(calls.at(-1).endpoint, 'fs/copy');

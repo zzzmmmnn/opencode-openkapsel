@@ -52,7 +52,9 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_docs` | On-demand reference chapters; start with `overview` |
 | `kapsel_fs_list`, `kapsel_fs_stat`, `kapsel_fs_read` | Remote directory/file reads; `.` means the workspace root |
 | `kapsel_fs_write`, `kapsel_fs_replace` | Remote text creation and editing |
-| `kapsel_mappings` | Client-backed directories, connection state, and execution capabilities |
+| `kapsel_mappings` | Client-backed directories, connection state, and advertised execution/RPC capabilities |
+| `kapsel_archive` | Browse ZIP/tar archives or read bounded members without extracting; mapped archives use client RPC |
+| `kapsel_rpc` | Unified dynamic mapping RPC entry: inspect `kapsel_mappings` for family/operation descriptions and input schemas, then invoke any advertised read-only plugin |
 | `kapsel_fs_copy`, `kapsel_fs_move`, `kapsel_transfer` | Cross-root file copy/move and asynchronous transfer control |
 | `kapsel_recycle` | List, restore, or explicitly purge entries in a selected recycle root |
 | `kapsel_client_task` | List, start, inspect, feed stdin to, interrupt, or kill a client-side process |
@@ -168,11 +170,18 @@ Requires OpenKapsel 1.57.0 for this contract. Git queries are read-only and
 independent of Shell/client execution permission, including read-only mappings.
 Git uses bounded sanitized local snapshots; inspect the shell reference for
 supported repository layouts, local disk overhead, and limits. There is no Git
-task/polling API. Arbitrary Shell/client commands remain permission-gated.
+task/polling API. `kapsel_rpc` is the single dynamic mapping-RPC entry point:
+`kapsel_mappings` publishes each family description plus each operation's
+`description` and JSON `input_schema`, so adding future `doc`, `csv`, `sqlite`,
+or other read-only client plugins does not require an OpenCode plugin update.
+`kapsel_archive` remains a convenience tool that also works for server-local
+archives. Arbitrary Shell/client commands remain permission-gated.
 
-The generic HTTP tool recognizes exactly POST `fs/read_many` and `fs/manifest`
-as read-only: neither requires mutation approval nor creates a Plan. Other POST
-operations retain their existing guard. Query values may be arrays to send
+The generic HTTP tool recognizes POST `fs/read_many`, `fs/manifest`, and the
+strict `mappings/<24-char-id>/rpc/<family>/<operation>` route as read-only:
+none requires mutation approval or creates a Plan. Archive preview uses GET
+`archive/list` and `archive/read`. Other POST operations retain their existing
+guard. Query values may be arrays to send
 repeated parameters, e.g. `include: ["*.py", "*.js"]` or `file: ["a", "b"]`.
 The vendored REST skill is synchronized with the main OpenKapsel project.
 
