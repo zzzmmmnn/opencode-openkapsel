@@ -74,7 +74,23 @@ test('denied writes do not create Plans or invoke remote requests', async (t) =>
 
 test('read RPCs bypass mutation approval, not write authorization', async (t) => {
   const calls = [];
-  const tools = createTools({ stateRoot: await temp(t), transport: async payload => { calls.push(payload); return { ok: true }; } });
+  const mappingId = 'abcdefghijklmnopqrstuvwx';
+  const tools = createTools({ stateRoot: await temp(t), transport: async payload => {
+    calls.push(payload);
+    if (payload.endpoint === 'mappings') return { mappings: [{
+      id: mappingId, name: 'laptop', writable: true,
+      capabilities: { rpc: { vendor: {
+        state: 'available', version: 1,
+        operations: ['inspect'],
+        operation_specs: { inspect: {
+          description: 'Inspect one integer.',
+          input_schema: { type: 'object', properties: { value: { type: 'integer' } }, required: ['value'], additionalProperties: false },
+          write: false,
+        } },
+      } } },
+    }] };
+    return { ok: true };
+  } });
   const ctx = { ...context('rpc-readonly', async () => { throw new Error('approval denied'); }), agent: READONLY_AGENT };
   for (const [name, args] of [
     ['kapsel_git', { action: 'status' }], ['kapsel_fs_read_many', { paths: ['a'] }],
@@ -83,14 +99,14 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
     ['kapsel_http', { method: 'POST', endpoint: 'fs/read_many', json: { paths: ['a'] } }],
     ['kapsel_http', { method: 'POST', endpoint: 'fs/manifest', json: { items: [{ path: 'a' }] } }],
     ['kapsel_archive', { action: 'list', path: 'laptop/sample.zip' }],
-    ['kapsel_rpc', { mapping_id: 'abcdefghijklmnopqrstuvwx', family: 'vendor', operation: 'inspect', args: { value: 7 } }],
-    ['kapsel_http', { method: 'POST', endpoint: 'mappings/abcdefghijklmnopqrstuvwx/rpc/vendor/inspect', json: { args: { value: 8 } } }],
+    ['kapsel_rpc', { mapping_id: mappingId, family: 'vendor', operation: 'inspect', args: { value: 7 } }],
+    ['kapsel_http', { method: 'POST', endpoint: `mappings/${mappingId}/rpc/vendor/inspect`, json: { args: { value: 8 } } }],
   ]) await tools[name].execute(args, ctx);
-  assert.equal(calls.length, 9);
+  assert.equal(calls.length, 11);
   assert.ok(calls.every(c => !c.plan_id && c.endpoint !== 'context'));
   assert.deepEqual(calls[3].query.include, ['*.py', '*.js']);
   await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read_many/../write', json: {} }, ctx));
-  assert.equal(calls.length, 9);
+  assert.equal(calls.length, 11);
 });
 
 test('client mapping tools route reads, mutations, and task controls through the approved bridge', async (t) => {
@@ -102,17 +118,29 @@ test('client mapping tools route reads, mutations, and task controls through the
     if (payload.endpoint === 'mappings') return { mappings: [{
       id: 'abcdefghijklmnopqrstuvwx',
       name: 'laptop',
+      writable: true,
       capabilities: { rpc: { vendor: {
-        state: 'available', version: 1, read_only: true,
-        description: 'Inspect vendor metadata.',
-        operations: ['inspect'],
-        operation_specs: { inspect: {
-          description: 'Inspect one integer.',
-          input_schema: {
-            type: 'object', properties: { value: { type: 'integer' } },
-            required: ['value'], additionalProperties: false,
+        state: 'available', version: 1, read_only: false,
+        description: 'Inspect or update vendor metadata.',
+        operations: ['inspect', 'update'],
+        operation_specs: {
+          inspect: {
+            description: 'Inspect one integer.',
+            input_schema: {
+              type: 'object', properties: { value: { type: 'integer' } },
+              required: ['value'], additionalProperties: false,
+            },
+            write: false,
           },
-        } },
+          update: {
+            description: 'Update one integer.',
+            input_schema: {
+              type: 'object', properties: { value: { type: 'integer' } },
+              required: ['value'], additionalProperties: false,
+            },
+            write: true,
+          },
+        },
       } } },
     }] };
     return { ok: true, id: 'transfer-id' };
@@ -126,11 +154,29 @@ test('client mapping tools route reads, mutations, and task controls through the
   const mappings = JSON.parse(await tools.kapsel_mappings.execute({}, ctx));
   assert.equal(calls.at(-1).endpoint, 'mappings');
   assert.equal(calls.at(-1).method, 'GET');
-  assert.equal(mappings.mappings[0].capabilities.rpc.vendor.description, 'Inspect vendor metadata.');
+  assert.equal(mappings.mappings[0].capabilities.rpc.vendor.description, 'Inspect or update vendor metadata.');
   assert.equal(
     mappings.mappings[0].capabilities.rpc.vendor.operation_specs.inspect.input_schema.properties.value.type,
     'integer',
   );
+  assert.equal(mappings.mappings[0].capabilities.rpc.vendor.operation_specs.inspect.write, false);
+  assert.equal(mappings.mappings[0].capabilities.rpc.vendor.operation_specs.update.write, true);
+
+  await tools.kapsel_rpc.execute({
+    mapping_id: mappingId, family: 'vendor', operation: 'inspect', args: { value: 1 },
+  }, ctx);
+  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/rpc/vendor/inspect`);
+  const approvalsBeforeRpcWrite = approvals;
+  await tools.kapsel_rpc.execute({
+    mapping_id: mappingId, family: 'vendor', operation: 'update', args: { value: 2 },
+    taskname: 'mapping', message: 'update vendor metadata',
+  }, ctx);
+  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/rpc/vendor/update`);
+  assert.equal(calls.at(-1).plan_id, 7);
+  assert.equal(calls.at(-1).taskname, 'mapping');
+  assert.equal(calls.at(-1).message, 'update vendor metadata');
+  assert.equal(approvals, approvalsBeforeRpcWrite + 1);
+
   await tools.kapsel_fs_copy.execute({ source: 'file.txt', destination: 'laptop/file.txt', ...mutation }, ctx);
   assert.deepEqual(calls.at(-1).json, { source: 'file.txt', destination: 'laptop/file.txt' });
   assert.equal(calls.at(-1).endpoint, 'fs/copy');
@@ -179,12 +225,32 @@ test('client mapping tools route reads, mutations, and task controls through the
     assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/tasks/${taskId}/${action}`);
   }
   assert.equal(calls.filter(call => call.endpoint === 'context').length, 1);
-  assert.equal(approvals, calls.filter(call => ['POST', 'PUT', 'PATCH', 'DELETE'].includes(call.method)).length - 1);
+  const approvalEligible = calls.filter(call =>
+    ['POST', 'PUT', 'PATCH', 'DELETE'].includes(call.method)
+    && call.endpoint !== 'context'
+    && call.endpoint !== `mappings/${mappingId}/rpc/vendor/inspect`
+  ).length;
+  assert.equal(approvals, approvalEligible);
 });
 
 test('read-only agent denies client mapping mutations before Plan creation or HTTP', async (t) => {
   const calls = [];
-  const tools = createTools({ stateRoot: await temp(t), transport: async payload => { calls.push(payload); return { ok: true }; } });
+  const mappingId = 'abcdefghijklmnopqrstuvwx';
+  const tools = createTools({ stateRoot: await temp(t), transport: async payload => {
+    calls.push(payload);
+    if (payload.endpoint === 'mappings') return { mappings: [{
+      id: mappingId, name: 'laptop', writable: true,
+      capabilities: { rpc: { vendor: {
+        state: 'available', operations: ['update'],
+        operation_specs: { update: {
+          description: 'Update one integer.',
+          input_schema: { type: 'object', properties: { value: { type: 'integer' } }, required: ['value'], additionalProperties: false },
+          write: true,
+        } },
+      } } },
+    }] };
+    return { ok: true };
+  } });
   const denied = { ...context('mapping-readonly', async () => { throw new Error('approval denied'); }), agent: READONLY_AGENT };
   for (const [name, args] of [
     ['kapsel_fs_copy', { source: 'a', destination: 'laptop/a' }],
@@ -194,9 +260,20 @@ test('read-only agent denies client mapping mutations before Plan creation or HT
     ['kapsel_client_task', { mapping_id: 'abcdefghijklmnopqrstuvwx', action: 'start', argv: ['python3'] }],
   ]) await assert.rejects(tools[name].execute(args, denied), /approval denied/);
   assert.equal(calls.length, 0);
+  await assert.rejects(
+    tools.kapsel_rpc.execute({
+      mapping_id: mappingId, family: 'vendor', operation: 'update', args: { value: 9 },
+      taskname: 'test', message: 'deny rpc write',
+    }, denied),
+    /approval denied/,
+  );
+  assert.deepEqual(calls.map(call => [call.method, call.endpoint]), [['GET', 'mappings']]);
+  assert.equal(calls.some(call => call.endpoint === 'context'), false);
+  assert.equal(calls.some(call => call.endpoint.endsWith('/rpc/vendor/update')), false);
+
   await tools.kapsel_mappings.execute({}, denied);
   await tools.kapsel_recycle.execute({ action: 'list' }, denied);
-  assert.deepEqual(calls.map(call => call.method), ['GET', 'GET']);
+  assert.deepEqual(calls.map(call => call.method), ['GET', 'GET', 'GET']);
 });
 
 test('session Plans persist, remain isolated, and concurrent writes create only one Plan', async (t) => {
