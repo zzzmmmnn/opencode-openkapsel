@@ -430,6 +430,15 @@ test('Python transport exercises real HTTP, dot paths, attribution, unicode and 
   assert.equal(calls.at(-1).body.plan_id, 42);
   assert.equal(calls.at(-1).body.taskname, 'opencode');
   assert.equal(calls.at(-1).auth, 'Bearer test_control');
+  assert.equal(Object.hasOwn(calls.at(-1).body, 'mount_mappings'), false);
+  const nativeBody = { command: 'python laptop/project/main.py', cwd: '.', target: 'server', mount_mappings: ['laptop', 'abcdefghijklmnopqrstuvwx'] };
+  await tools.kapsel_shell_exec.execute(nativeBody, context());
+  assert.deepEqual(calls.at(-1).body.mount_mappings, nativeBody.mount_mappings);
+  assert.equal(calls.at(-1).body.target, 'server');
+  assert.equal(calls.at(-1).body.plan_id, 42);
+  await tools.kapsel_http.execute({ method: 'POST', endpoint: 'shell/exec', json: nativeBody }, context());
+  assert.deepEqual(calls.at(-1).body.mount_mappings, nativeBody.mount_mappings);
+  assert.equal(calls.at(-1).body.plan_id, 42);
   assert.equal(await tools.kapsel_http.execute({ method: 'GET', endpoint: 'text' }, context()), 'Hello 中文');
   await assert.rejects(tools.kapsel_http.execute({ method: 'GET', endpoint: 'fail' }, context()), /HTTP 400/);
   await assert.rejects(tools.kapsel_http.execute({ method: 'GET', endpoint: 'redirect' }, context()), /302/);
