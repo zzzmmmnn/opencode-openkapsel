@@ -7,7 +7,7 @@ import { tool } from '@opencode-ai/plugin';
 import { createTools } from '../lib/tools.js';
 import { AGENT, READONLY_AGENT, PROMPT } from '../lib/bridge.js';
 
-async function fixture(t, { deny = false, failure, response } = {}) {
+async function fixture(t, { deny = false, failure, response, contextResponse } = {}) {
   const stateRoot = await mkdtemp(join(tmpdir(), 'opencode-rpc-first-'));
   t.after(() => rm(stateRoot, { recursive: true, force: true }));
   const calls = [];
@@ -15,7 +15,7 @@ async function fixture(t, { deny = false, failure, response } = {}) {
   const tools = createTools({ stateRoot, transport: async payload => {
     calls.push(payload);
     if (failure) throw new Error(failure);
-    if (payload.endpoint === 'context') return { id: 7 };
+    if (payload.endpoint === 'context') return contextResponse ?? { id: 7 };
     return response ?? { task_id: 'task_test', location: 'server' };
   } });
   const ctx = { sessionID: 'rpc-first-test', agent: deny ? READONLY_AGENT : AGENT,
@@ -99,4 +99,35 @@ test('bundled references and agent prompt describe RPC-first dependencies and er
   assert.match(PROMPT, /mounted=false/);
   assert.match(PROMPT, /mount_mappings/);
   assert.match(PROMPT, /never automatically replay/i);
+});
+
+
+test('atomic Plan requests and child receipts pass through without an automatic extra Plan', async t => {
+  const receipt = { id: 20, request_id: 'feature-01', replayed: false, subplans: [
+    { index: 0, ref: 'code', id: 21, plan_id: 20 }, { index: 1, ref: 'tests', id: 22, plan_id: 20 },
+  ] };
+  const f = await fixture(t, { contextResponse: receipt });
+  const json = { type: 'plan', taskname: 'feature', content: 'Implement', request_id: 'feature-01',
+    subplans: [{ ref: 'code', content: 'Code' }, { ref: 'tests', content: 'Verify' }] };
+  const result = JSON.parse(await f.tools.kapsel_http.execute({ method: 'POST', endpoint: 'context', json }, f.ctx));
+  assert.deepEqual(result, receipt);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0].json, json);
+  assert.equal(f.calls[0].endpoint, 'context');
+  assert.equal(f.calls[0].plan_id, undefined);
+  assert.equal(f.approvals(), 1);
+  assert.match(await f.tools.kapsel_docs.execute({ topic: 'context' }, f.ctx), /Create a plan and direct subplans in one call/);
+  assert.match(PROMPT, /subplans.*request_id/);
+});
+
+test('atomic Plan requests keep approvals and never replay an uncertain creation', async t => {
+  const args = { method: 'POST', endpoint: 'context', json: { type: 'plan', taskname: 'feature', content: 'Once',
+    request_id: 'feature-02', subplans: [{ ref: 'child', content: 'Child' }] } };
+  const denied = await fixture(t, { deny: true });
+  await assert.rejects(denied.tools.kapsel_http.execute(args, denied.ctx), /approval denied/);
+  assert.equal(denied.calls.length, 0);
+  const failed = await fixture(t, { failure: 'response lost' });
+  await assert.rejects(failed.tools.kapsel_http.execute(args, failed.ctx), /response lost/);
+  assert.equal(failed.calls.length, 1);
+  assert.equal(failed.calls[0].json.request_id, 'feature-02');
 });
