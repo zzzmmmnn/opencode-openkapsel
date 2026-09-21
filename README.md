@@ -263,3 +263,15 @@ affected paths; never automatically replay the command or RPC mutation.
 
 The bundled skill's mappings, Shell and web/application references document the
 contract. Runtime Discovery remains authoritative for server-version differences.
+
+## Structured configuration and large tables
+
+Use `kapsel_mappings` to inspect the client's `structured` and `tabular` schemas,
+then call `kapsel_rpc`. Structured JSON/YAML/TOML edits use conditional atomic
+write/patch tasks; CSV/Excel operations are read-only, including asynchronous
+`tabular.scan`. CSV pages use authenticated seek cursors, not repeated row-offset
+scans. Segment scans return explicit progress/continuation and must not be
+mistaken for complete whole-file aggregates. Format availability depends on
+optional libraries installed on the mapping client. No FUSE is needed.
+
+Read `kapsel_docs` with `topic: "data-rpc"` for the complete contract.
