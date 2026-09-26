@@ -7,7 +7,7 @@ import { tool } from '@opencode-ai/plugin';
 import { createTools } from '../lib/tools.js';
 import { AGENT, READONLY_AGENT, PROMPT } from '../lib/bridge.js';
 
-async function fixture(t, { deny = false, failure, response, contextResponse } = {}) {
+async function fixture(t, { deny = false, failure, response, contextResponse, discoveryResponse } = {}) {
   const stateRoot = await mkdtemp(join(tmpdir(), 'opencode-rpc-first-'));
   t.after(() => rm(stateRoot, { recursive: true, force: true }));
   const calls = [];
@@ -16,6 +16,7 @@ async function fixture(t, { deny = false, failure, response, contextResponse } =
     calls.push(payload);
     if (failure) throw new Error(failure);
     if (payload.endpoint === 'context') return contextResponse ?? { id: 7 };
+    if (payload.endpoint === '/' && discoveryResponse) return discoveryResponse;
     return response ?? { task_id: 'task_test', location: 'server' };
   } });
   const ctx = { sessionID: 'rpc-first-test', agent: deny ? READONLY_AGENT : AGENT,
@@ -90,12 +91,62 @@ test('unmounted online mappings and partial query results pass through read-only
   assert.deepEqual(f.calls.map(c => c.endpoint), ['mappings', 'fs/search']);
 });
 
+test('kapsel_rpc targets server when mapping_id is omitted and preserves read/write policy', async t => {
+  const discoveryResponse = {
+    capabilities: { mappings: { rpc: { families: {
+      git: { server_rpc: true, sync_reads: ['status'], task_writes: ['commit', 'fetch'] },
+      archive: { server_rpc: true, sync_reads: ['list', 'read'], task_writes: ['create', 'extract'] },
+    } } } },
+  };
+
+  const readonly = await fixture(t, { deny: true, discoveryResponse, response: { ok: true } });
+  const schema = tool.schema.object(readonly.tools.kapsel_rpc.args);
+  assert.equal(schema.safeParse({ family: 'git', operation: 'status' }).success, true);
+  await readonly.tools.kapsel_rpc.execute({ family: 'git', operation: 'status', args: { path: '.' } }, readonly.ctx);
+  assert.deepEqual(readonly.calls.map(c => [c.method, c.endpoint]), [
+    ['GET', '/'],
+    ['POST', 'rpc/git/status'],
+  ]);
+  assert.equal(readonly.approvals(), 0);
+
+  await readonly.tools.kapsel_http.execute({
+    method: 'POST', endpoint: 'rpc/archive/list', json: { args: { path: 'sample.zip' } },
+  }, readonly.ctx);
+  assert.deepEqual(readonly.calls.slice(-2).map(c => [c.method, c.endpoint]), [
+    ['GET', '/'],
+    ['POST', 'rpc/archive/list'],
+  ]);
+  assert.equal(readonly.approvals(), 0);
+
+  const writable = await fixture(t, {
+    discoveryResponse,
+    response: { task_id: 'task_server_rpc', location: 'server', execution: 'task' },
+  });
+  await writable.tools.kapsel_rpc.execute({
+    family: 'git', operation: 'commit', args: { message: 'test' }, timeout_seconds: 30,
+    plan_id: 7, taskname: 'git', message: 'Commit server repository',
+  }, writable.ctx);
+  assert.equal(writable.calls[0].endpoint, '/');
+  assert.equal(writable.calls[1].endpoint, 'rpc/git/commit');
+  assert.deepEqual(writable.calls[1].json, { args: { message: 'test' }, timeout_seconds: 30 });
+  assert.equal(writable.calls[1].plan_id, 7);
+  assert.equal(writable.calls[1].taskname, 'git');
+  assert.equal(writable.calls[1].message, 'Commit server repository');
+  assert.equal(writable.approvals(), 1);
+
+  await assert.rejects(
+    writable.tools.kapsel_rpc.execute({ family: 'git', operation: 'unknown' }, writable.ctx),
+    /not advertised/,
+  );
+});
+
 test('bundled references and agent prompt describe RPC-first dependencies and errors', async () => {
   const tools = createTools();
-  const texts = await Promise.all(['overview', 'mappings', 'shell', 'files', 'web-and-apps', 'endpoint-index'].map(topic => tools.kapsel_docs.execute({ topic }, {})));
+  const texts = await Promise.all(['overview', 'mappings', 'shell', 'files', 'web-and-apps', 'endpoint-index', 'ssh-rpc'].map(topic => tools.kapsel_docs.execute({ topic }, {})));
   const text = texts.join('\n');
-  for (const term of ['mount_mappings', 'api/mappings.json', 'file_stream', 'unavailable_mappings', 'rpc.file has been removed']) assert.ok(text.includes(term), term);
+  for (const term of ['mount_mappings', 'api/mappings.json', 'file_stream', 'unavailable_mappings', 'rpc.file has been removed', 'POST /rpc/<family>/<operation>', 'SSH RPC']) assert.ok(text.includes(term), term);
   assert.doesNotMatch(text, /It may fall back to FUSE|`rpc\.file`, `rpc\.git`/);
+  assert.match(PROMPT, /without mapping_id targets the server workspace/);
   assert.match(PROMPT, /mounted=false/);
   assert.match(PROMPT, /mount_mappings/);
   assert.match(PROMPT, /never automatically replay/i);

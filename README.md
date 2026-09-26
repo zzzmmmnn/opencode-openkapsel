@@ -54,7 +54,7 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_fs_write`, `kapsel_fs_replace` | Remote text creation and editing |
 | `kapsel_mappings` | Client-backed directories, connection state, and advertised execution/RPC capabilities |
 | `kapsel_archive` | Browse ZIP/tar archives or read bounded members without extracting; mapped archives use client RPC |
-| `kapsel_rpc` | Unified dynamic mapping RPC entry: inspect each operation's schema, `write`, and `execution`; sync returns directly, task returns a persistent client task id; writes use OpenCode approval + Plan/Context and require a writable mapping |
+| `kapsel_rpc` | Unified server/mapping RPC entry: omit `mapping_id` for the server workspace or provide it for a client mapping; sync returns directly, task returns a normal server or unified client task id; writes use OpenCode approval + Plan/Context and mapped writes require a writable mapping |
 | `kapsel_fs_copy`, `kapsel_fs_move`, `kapsel_transfer` | Cross-root file copy/move and asynchronous transfer control |
 | `kapsel_recycle` | List, restore, or explicitly purge entries in a selected recycle root |
 | `kapsel_client_task` | List/start legacy client Shell tasks and inspect/interrupt/kill unified client task ids returned by `kapsel_rpc`/`kapsel_shell_exec`; RPC tasks do not accept stdin |
@@ -162,42 +162,51 @@ records the revision. Maintain the protocol there and update this snapshot.
 
 MIT licensed. Independent community integration, not an official OpenCode product.
 
-## Read-only RPC tools
+## Unified RPC and read-side tools
 
 Version 0.3.0 adds `kapsel_git` (status/diff/diff_stat/log/show/ls_files),
 `kapsel_fs_read_many`, `kapsel_fs_manifest`, and `kapsel_fs_search`.
-Requires OpenKapsel with RPC-plugin task support (commit `95392b5` or a later
-release) for this contract. Git read operations remain independent of
-Shell/client execution permission and use bounded sanitized snapshots. Git
-`add`, `commit`, `restore`, and `checkout` are advertised as
-`write=true, execution=task`; Archive `create` and `extract` use the same
-persistent task model. `kapsel_rpc` is the single dynamic mapping-RPC entry
-point: `kapsel_mappings` publishes each family description plus each operation's
-`description`, JSON `input_schema`, boolean `write`, and `execution`
-(`sync` or `task`). A task operation returns a unified
-`client.<mapping>.<task>` id immediately; poll it with `kapsel_task_output`
-or inspect/control it with `kapsel_client_task`. The task survives provider
-disconnect/reconnect while the client process stays alive. Never replay an
-uncertain write-task start; reconnect and query/list the returned or candidate
-task id instead. `write=true` still uses OpenCode approval plus OpenKapsel
-Plan/Context and requires the mapping to be administratively writable.
-`kapsel_archive` remains a read-preview convenience tool for local or mapped
-archives; Archive create/extract use `kapsel_rpc`.
+The current unified RPC contract targets OpenKapsel 1.62.0+. Git read operations
+remain independent of Shell/client execution permission and use bounded
+sanitized snapshots. Git `add`, `commit`, `restore`, `checkout`,
+`fetch`, `pull`, and `clone` are `write=true, execution=task`;
+Archive `create` and `extract` use the same task model.
+
+`kapsel_rpc` is the single dynamic RPC entry point for both locations. Omit
+`mapping_id` to target the server workspace; provide a mapping id to target a
+client mapping. Server-capable families are advertised by Discovery under
+`capabilities.mappings.rpc.families` with `server_rpc` and operation
+categories such as `sync_reads` / `task_writes`. Client mappings continue to
+publish per-operation `description`, JSON `input_schema`, boolean `write`,
+and `execution` through `kapsel_mappings`.
+
+A server task returns a normal server task id; a mapping task returns a unified
+`client.<mapping>.<task>` id. Poll either with `kapsel_task_output`. Mapping
+RPC tasks can additionally be inspected/controlled with `kapsel_client_task`;
+server task controls use the ordinary `/tasks` REST lifecycle. Never replay an
+uncertain write-task start. `write=true` always uses OpenCode approval plus
+OpenKapsel Plan/Context; mapped writes additionally require the mapping to be
+administratively writable. There is no server/mapping/FUSE fallback after the
+RPC target is selected. `kapsel_archive` remains a read-preview convenience
+tool; Archive create/extract use `kapsel_rpc`.
 
 The generic HTTP tool recognizes POST `fs/read_many` and `fs/manifest` as
-read-only. For `mappings/<24-char-id>/rpc/<family>/<operation>`, it consults
-the live operation `write` metadata: reads bypass mutation approval, while writes
-use approval and Plan attribution. Archive preview uses GET `archive/list` and
-`archive/read`. Other POST operations retain their existing guard. Query values
-may be arrays to send
-repeated parameters, e.g. `include: ["*.py", "*.js"]` or `file: ["a", "b"]`.
-The vendored REST skill is synchronized with the main OpenKapsel project. Mapping RPC replies default to a 90-second server deadline; the bundled HTTP helper waits 120 seconds and the OpenCode helper process budget is 130 seconds, so the wrapper does not normally time out before the server.
+read-only. It also classifies both `rpc/<family>/<operation>` and
+`mappings/<24-char-id>/rpc/<family>/<operation>` from runtime RPC metadata, so
+RPC reads bypass mutation approval while writes use approval and Plan
+attribution. Archive preview uses GET `archive/list` and `archive/read`.
+Other POST operations retain their existing guard. Query values may be arrays
+to send repeated parameters, e.g. `include: ["*.py", "*.js"]` or
+`file: ["a", "b"]`. The vendored REST skill is synchronized with the main
+OpenKapsel project. Server RPC task deadlines default to 600 seconds unless
+overridden (maximum 86400); mapped RPC task deadlines also obey the client task
+policy. The bundled HTTP helper waits 120 seconds and the OpenCode helper process
+budget is 130 seconds for ordinary synchronous requests.
 
 ## Client reconnects and portable text
 
-The bundled REST references track OpenKapsel 1.60.1. Reconnect persistence needs
-client 1.58.0+; explicit text codecs and literal newline handling need server
-1.59.0+ and client file API v3 for direct mapped RPC.
+The bundled REST references track OpenKapsel 1.62.0. The current mapping
+handshake requires client 1.62.0+.
 
 A network disconnect does not stop tasks in the running client process.
 Reconnect and list/query the original task IDs to retrieve output and exit
