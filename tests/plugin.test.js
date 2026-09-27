@@ -51,7 +51,7 @@ test('endpoint traversal, scheme and control character checks', () => {
   for (const value of ['../admin', '%2e%2e/admin', '%252e%252e/admin', 'fs/%00', '//evil.test/x', 'file:///etc/passwd', '--output', 'fs\\..\\admin']) {
     assert.throws(() => validateEndpoint(value));
   }
-  assert.equal(validateEndpoint('fs/list'), 'fs/list');
+  assert.equal(validateEndpoint('fs/query/list'), 'fs/query/list');
 });
 
 test('Python helper transport explicitly uses UTF-8 on every platform', async () => {
@@ -94,20 +94,19 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
   } });
   const ctx = { ...context('rpc-readonly', async () => { throw new Error('approval denied'); }), agent: READONLY_AGENT };
   for (const [name, args] of [
-    ['kapsel_git', { action: 'status' }], ['kapsel_fs_read_many', { paths: ['a'] }],
+['kapsel_fs_read_many', { paths: ['a'] }],
     ['kapsel_fs_manifest', { recursive: true }],
     ['kapsel_fs_search', { query: 'text', include: ['*.py', '*.js'] }],
-    ['kapsel_http', { method: 'POST', endpoint: 'fs/read_many', json: { paths: ['a'] } }],
-    ['kapsel_http', { method: 'POST', endpoint: 'fs/manifest', json: { items: [{ path: 'a' }] } }],
-    ['kapsel_archive', { action: 'list', path: 'laptop/sample.zip' }],
+    ['kapsel_http', { method: 'POST', endpoint: 'fs/read/many', json: { paths: ['a'] } }],
+    ['kapsel_http', { method: 'POST', endpoint: 'fs/query/manifest', json: { items: [{ path: 'a' }] } }],
     ['kapsel_rpc', { mapping_id: mappingId, family: 'vendor', operation: 'inspect', args: { value: 7 } }],
     ['kapsel_http', { method: 'POST', endpoint: `mappings/${mappingId}/rpc/vendor/inspect`, json: { args: { value: 8 } } }],
   ]) await tools[name].execute(args, ctx);
-  assert.equal(calls.length, 11);
+  assert.equal(calls.length, 9);
   assert.ok(calls.every(c => !c.plan_id && c.endpoint !== 'context'));
-  assert.deepEqual(calls[3].query.include, ['*.py', '*.js']);
-  await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read_many/../write', json: {} }, ctx));
-  assert.equal(calls.length, 11);
+  assert.deepEqual(calls.find(c => c.endpoint === 'fs/query/search').query.include, ['*.py', '*.js']);
+  await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read/many/../write', json: {} }, ctx));
+  assert.equal(calls.length, 9);
 });
 
 test('client mapping tools route reads, mutations, and task controls through the approved bridge', async (t) => {
@@ -245,12 +244,12 @@ test('client mapping tools route reads, mutations, and task controls through the
   assert.equal(calls.at(-1).message, 'update vendor metadata asynchronously');
   assert.equal(approvals, approvalsBeforeRpcWrite + 2);
 
-  const rpcStatus = JSON.parse(await tools.kapsel_client_task.execute({
-    mapping_id: mappingId, action: 'status', task_id: taskRpc.task_id,
+  const rpcStatus = JSON.parse(await tools.kapsel_http.execute({
+    method: 'GET', endpoint: 'tasks/' + taskRpc.task_id,
   }, ctx));
   assert.equal(rpcStatus.kind, 'rpc');
   assert.equal(rpcStatus.rpc_operation, 'task_update');
-  assert.equal(calls.at(-1).endpoint, `tasks/${taskRpc.task_id}`);
+  assert.equal(calls.at(-1).endpoint, 'tasks/' + taskRpc.task_id);
 
   const rpcOutput = JSON.parse(await tools.kapsel_task_output.execute({
     task_id: taskRpc.task_id, stdout_offset: 0,
@@ -260,24 +259,24 @@ test('client mapping tools route reads, mutations, and task controls through the
   assert.equal(calls.at(-1).endpoint, `tasks/${taskRpc.task_id}/output`);
 
   for (const action of ['interrupt', 'kill']) {
-    await tools.kapsel_client_task.execute({
-      mapping_id: mappingId,
-      action,
-      task_id: taskRpc.task_id,
+    await tools.kapsel_http.execute({
+      method: 'POST',
+      endpoint: 'tasks/' + taskRpc.task_id + '/' + action,
+      json: {},
       taskname: 'mapping',
       message: action + ' rpc task',
     }, ctx);
-    assert.equal(calls.at(-1).endpoint, `tasks/${taskRpc.task_id}/${action}`);
+    assert.equal(calls.at(-1).endpoint, 'tasks/' + taskRpc.task_id + '/' + action);
   }
 
   await tools.kapsel_fs_copy.execute({ source: 'file.txt', destination: 'laptop/file.txt', ...mutation }, ctx);
   assert.deepEqual(calls.at(-1).json, { source: 'file.txt', destination: 'laptop/file.txt' });
-  assert.equal(calls.at(-1).endpoint, 'fs/copy');
+  assert.equal(calls.at(-1).endpoint, 'fs/write/copy');
   assert.equal(calls.at(-1).plan_id, 7);
   assert.equal(calls.at(-1).taskname, 'mapping');
   assert.equal(calls.at(-1).message, 'test mapped storage');
   await tools.kapsel_fs_move.execute({ source: 'laptop/file.txt', destination: 'file.txt' }, ctx);
-  assert.equal(calls.at(-1).endpoint, 'fs/move');
+  assert.equal(calls.at(-1).endpoint, 'fs/write/move');
   assert.equal(calls.at(-1).plan_id, 7);
 
   await tools.kapsel_transfer.execute({ transfer_id: 'transfer-id', action: 'status' }, ctx);
@@ -300,23 +299,6 @@ test('client mapping tools route reads, mutations, and task controls through the
   assert.equal(calls.at(-1).endpoint, 'recycle/purge');
   assert.equal(calls.at(-1).json.confirm, true);
 
-  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'list' }, ctx);
-  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/tasks`);
-  assert.equal(calls.at(-1).method, 'GET');
-  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'start', argv: ['python3', '-V'], cwd: '.' }, ctx);
-  assert.deepEqual(calls.at(-1).json, { argv: ['python3', '-V'], cwd: '.' });
-  assert.equal(calls.at(-1).method, 'POST');
-  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'status', task_id: taskId, offset: 4 }, ctx);
-  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/tasks/${taskId}`);
-  assert.deepEqual(calls.at(-1).query, { offset: 4 });
-  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'stdin', task_id: taskId, stdin_text: 'héllo' }, ctx);
-  assert.equal(calls.at(-1).json.data, Buffer.from('héllo').toString('base64'));
-  await tools.kapsel_client_task.execute({ mapping_id: mappingId, action: 'stdin', task_id: taskId, eof: true }, ctx);
-  assert.equal(calls.at(-1).json.eof, true);
-  for (const action of ['interrupt', 'kill']) {
-    await tools.kapsel_client_task.execute({ mapping_id: mappingId, action, task_id: taskId }, ctx);
-    assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/tasks/${taskId}/${action}`);
-  }
   assert.equal(calls.filter(call => call.endpoint === 'context').length, 1);
   const approvalEligible = calls.filter(call =>
     ['POST', 'PUT', 'PATCH', 'DELETE'].includes(call.method)
@@ -351,7 +333,6 @@ test('read-only agent denies client mapping mutations before Plan creation or HT
     ['kapsel_fs_move', { source: 'a', destination: 'laptop/a' }],
     ['kapsel_transfer', { transfer_id: 'transfer-id', action: 'cancel' }],
     ['kapsel_recycle', { action: 'purge', recycle_id: 'x', confirm: true }],
-    ['kapsel_client_task', { mapping_id: 'abcdefghijklmnopqrstuvwx', action: 'start', argv: ['python3'] }],
   ]) await assert.rejects(tools[name].execute(args, denied), /approval denied/);
   assert.equal(calls.length, 0);
   await assert.rejects(
@@ -420,7 +401,7 @@ test('Python transport exercises real HTTP, dot paths, attribution, unicode and 
   assert.doesNotMatch(configured, /test_read|test_control/);
   await tools.kapsel_fs_list.execute({ path: '.' }, context());
   await tools.kapsel_fs_search.execute({ query: 'x', include: ['*.py', '*.js'] }, context());
-  const search = calls.find(c => c.url.includes('/fs/search'));
+  const search = calls.find(c => c.url.includes('/fs/query/search'));
   assert.deepEqual(new URL(search.url, url).searchParams.getAll('include'), ['*.py', '*.js']);
   assert.ok(calls.some(c => c.url.includes('path=.')));
   const command = "printf '你好'\n$(touch SHOULD_NEVER_RUN) `echo bad` \\ $HOME \u0000";

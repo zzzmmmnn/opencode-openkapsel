@@ -88,7 +88,7 @@ test('unmounted online mappings and partial query results pass through read-only
   assert.deepEqual(JSON.parse(await f.tools.kapsel_mappings.execute({}, f.ctx)), response);
   assert.deepEqual(JSON.parse(await f.tools.kapsel_fs_search.execute({ query: 'needle', path: '.' }, f.ctx)), response);
   assert.equal(f.approvals(), 0);
-  assert.deepEqual(f.calls.map(c => c.endpoint), ['mappings', 'fs/search']);
+  assert.deepEqual(f.calls.map(c => c.endpoint), ['mappings', 'fs/query/search']);
 });
 
 test('kapsel_rpc targets server when mapping_id is omitted and preserves read/write policy', async t => {
