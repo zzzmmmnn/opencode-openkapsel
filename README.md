@@ -50,7 +50,7 @@ session to a different workspace. Two sessions can connect to different tokens.
 |---|---|
 | `kapsel_config`, `kapsel_status` | Connection setup and capability summary |
 | `kapsel_docs` | On-demand reference chapters; start with `overview` |
-| `kapsel_fs_list`, `kapsel_fs_stat`, `kapsel_fs_read` | Remote directory/file reads; `.` means the workspace root |
+| `kapsel_fs_list`, `kapsel_fs_stat`, `kapsel_fs_read_files`, `kapsel_fs_grep` | Remote directory/file reads; `.` means the workspace root |
 | `kapsel_fs_write`, `kapsel_fs_replace` | Remote text creation and editing |
 | `kapsel_mappings` | Client-backed directories, connection state, and advertised execution/RPC capabilities |
 | `kapsel_rpc` | Unified server/mapping RPC entry: omit `mapping_id` for the server workspace or provide it for a client mapping; sync returns directly, task returns a normal server or unified client task id; writes use OpenCode approval + Plan/Context and mapped writes require a writable mapping |
@@ -69,7 +69,7 @@ documented remote APIs and output polling as applicable.
 For mapped directories, call `kapsel_mappings` first. Client Shell execution
 uses `kapsel_shell_exec`; a mapped `cwd` with `target: "auto"` runs on that
 client and returns a unified task ID. Inspect output with `kapsel_task_output`
-and use `kapsel_http` with ordinary `/tasks/*` routes for status, stdin,
+and use `kapsel_http` with ordinary `/task/*` routes for status, stdin,
 interrupt, or kill. Mapping-specific public task/argv REST endpoints are not
 exposed. Inspect the advertised sandbox mode before execution:
 `native-unsandboxed` has the client OS account's permissions.
@@ -80,7 +80,7 @@ exposed. Inspect the advertised sandbox mode before execution:
 fails without server fallback. A client needs OpenKapsel 1.62.0+ and a writable
 execution-enabled mapping. Its platform, sandbox, and limits apply; server
 `/env` is not injected. `kapsel_task_output` accepts either task location's ID;
-client stdout/stderr are combined in stdout. The ordinary `/tasks` control APIs
+client stdout/stderr are combined in stdout. The ordinary `/task/*` control APIs
 remain available through `kapsel_http` (client stdin: at most 16 KiB per call).
 The public execution interface is command-string based; there is no
 mapping-specific literal-argv REST endpoint.
@@ -163,8 +163,8 @@ MIT licensed. Independent community integration, not an official OpenCode produc
 
 ## Unified RPC and read-side tools
 
-Version 0.3.0 added `kapsel_fs_read_many`, `kapsel_fs_manifest`, and
-`kapsel_fs_search`. The current unified RPC contract targets OpenKapsel 1.62.0+.
+Version 0.3.0 added `kapsel_fs_read_files`, `kapsel_fs_manifest`, and
+`kapsel_fs_grep`. The current unified RPC contract targets OpenKapsel 1.62.0+.
 Git and Archive operations use `kapsel_rpc`; Git read operations
 remain independent of Shell/client execution permission and use bounded
 sanitized snapshots. Git `add`, `commit`, `restore`, `checkout`,
@@ -172,7 +172,7 @@ sanitized snapshots. Git `add`, `commit`, `restore`, `checkout`,
 Archive `create` and `extract` use the same task model.
 
 `kapsel_rpc` is the single dynamic RPC entry point for both locations. Omit
-`mapping_id` to target the server workspace; provide a mapping id to target a
+`mapping_id` to target the server workspace; provide a mapping name to target a
 client mapping. Server-capable families are advertised by Discovery under
 `capabilities.mappings.rpc.families` with `server_rpc` and operation
 categories such as `sync_reads` / `task_writes`. Client mappings continue to
@@ -181,14 +181,14 @@ and `execution` through `kapsel_mappings`.
 
 A server task returns a normal server task id; a mapping task returns a unified
 `client.<mapping>.<task>` id. Poll either with `kapsel_task_output`; inspect or
-control either kind through ordinary `/tasks/*` routes with `kapsel_http`.
+control either kind through ordinary `/task/*` routes with `kapsel_http`.
 Never replay an uncertain write-task start. `write=true` always uses OpenCode
 approval plus OpenKapsel Plan/Context; mapped writes additionally require the
 mapping to be administratively writable. There is no server/mapping/FUSE
 fallback after the RPC target is selected. Git reads/writes and Archive
 list/read/create/extract all use `kapsel_rpc`.
 
-The generic HTTP tool recognizes POST `fs/read/many` and `fs/query/manifest` as
+The generic HTTP tool recognizes POST `fs/read/files` and `fs/query/manifest` as
 read-only. It also classifies both `rpc/<family>/<operation>` and
 `mappings/<24-char-id>/rpc/<family>/<operation>` from runtime RPC metadata, so
 RPC reads bypass mutation approval while writes use approval and Plan
@@ -216,9 +216,8 @@ be evicted earlier for capacity. Client process restarts do not restore tasks.
 Do not automatically replay a start whose response was lost.
 
 Text APIs default to UTF-8 without using the host locale. For a non-default
-encoding use `kapsel_http`: pass `encoding` in the query for GET `fs/read/text`,
-in the JSON body for POST `fs/read/many`, or on each item in POST
-`fs/write/mutate`. Typed file tools keep their default encoding. `kapsel_fs_write`
+encoding, pass `encoding` to `kapsel_fs_read_files` (or in the JSON body for
+POST `fs/read/files`) and on each relevant item in POST `fs/write/mutate`. `kapsel_fs_write`
 uses `file.create` or exact-ETag `file.replace`; `kapsel_fs_replace` requires the
 exact `expected_etag` and an exact match count (default 1).
 
@@ -321,4 +320,4 @@ See the bundled Context reference for direct-child limits and idempotency rules.
 
 ## OAuth browser consent is separate from this REST bridge
 
-OpenKapsel OAuth-capable MCP clients use the independent browser consent page. A user verifies ownership there with the current control token for the exact linked configuration; administrator login is not required. This plugin continues using its existing REST credentials and never submits them to a browser form or client callback. OAuth access/refresh credentials remain separate from REST credentials. Updating server consent does not require a new plugin transport or new tool. If you already have an authenticated OAuth or Static MCP connection on another platform, the server-side `get_workspace_credentials` tool can export the current REST workspace URL/control token for configuring this plugin, and `renew_workspace_credentials` can rotate that REST pair inside the normal renewal window without changing the MCP credential.
+OpenKapsel OAuth-capable MCP clients use the independent browser consent page. A user verifies ownership there with the current control token for the exact linked configuration; administrator login is not required. This plugin continues using its existing REST credentials and never submits them to a browser form or client callback. OAuth access/refresh credentials remain separate from REST credentials. Updating server consent does not require a new plugin transport or new tool. If you already have an authenticated OAuth or Static MCP connection on another platform, the server-side `credentials_get` tool can export the current REST workspace URL/control token for configuring this plugin, and `credentials_renew` can rotate that REST pair inside the normal renewal window without changing the MCP credential.

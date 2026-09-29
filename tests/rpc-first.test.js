@@ -86,9 +86,9 @@ test('unmounted online mappings and partial query results pass through read-only
     truncated: true, unavailable_mappings: [{ mapping_id: 'other', code: 'mapping_offline' }] };
   const f = await fixture(t, { deny: true, response });
   assert.deepEqual(JSON.parse(await f.tools.kapsel_mappings.execute({}, f.ctx)), response);
-  assert.deepEqual(JSON.parse(await f.tools.kapsel_fs_search.execute({ query: 'needle', path: '.' }, f.ctx)), response);
+  assert.deepEqual(JSON.parse(await f.tools.kapsel_fs_grep.execute({ query: 'needle', path: '.' }, f.ctx)), response);
   assert.equal(f.approvals(), 0);
-  assert.deepEqual(f.calls.map(c => c.endpoint), ['mappings', 'fs/query/search']);
+  assert.deepEqual(f.calls.map(c => c.endpoint), ['mappings', 'fs/query/grep']);
 });
 
 test('kapsel_rpc targets server when mapping_id is omitted and preserves read/write policy', async t => {
@@ -138,6 +138,24 @@ test('kapsel_rpc targets server when mapping_id is omitted and preserves read/wr
     writable.tools.kapsel_rpc.execute({ family: 'git', operation: 'unknown' }, writable.ctx),
     /not advertised/,
   );
+});
+
+test('mapping RPC prefers the short mapping name and remains read-only', async t => {
+  const mapping = {
+    id: 'abcdefghijklmnopqrstuvwx', name: 'laptop', writable: true,
+    capabilities: { rpc: { git: { state: 'available', operation_specs: {
+      status: { write: false, execution: 'sync' },
+    } } } },
+  };
+  const f = await fixture(t, { deny: true, response: { mappings: [mapping] } });
+  await f.tools.kapsel_rpc.execute({
+    mapping_id: mapping.name, family: 'git', operation: 'status', args: { cwd: '.' },
+  }, f.ctx);
+  assert.deepEqual(f.calls.map(c => [c.method, c.endpoint]), [
+    ['GET', 'mappings'],
+    ['POST', 'mappings/laptop/rpc/git/status'],
+  ]);
+  assert.equal(f.approvals(), 0);
 });
 
 test('bundled references and agent prompt describe RPC-first dependencies and errors', async () => {

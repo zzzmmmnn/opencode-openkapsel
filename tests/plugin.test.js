@@ -94,18 +94,18 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
   } });
   const ctx = { ...context('rpc-readonly', async () => { throw new Error('approval denied'); }), agent: READONLY_AGENT };
   for (const [name, args] of [
-['kapsel_fs_read_many', { paths: ['a'] }],
+['kapsel_fs_read_files', { paths: ['a'] }],
     ['kapsel_fs_manifest', { recursive: true }],
-    ['kapsel_fs_search', { query: 'text', include: ['*.py', '*.js'] }],
-    ['kapsel_http', { method: 'POST', endpoint: 'fs/read/many', json: { paths: ['a'] } }],
+    ['kapsel_fs_grep', { query: 'text', include: ['*.py', '*.js'] }],
+    ['kapsel_http', { method: 'POST', endpoint: 'fs/read/files', json: { paths: ['a'] } }],
     ['kapsel_http', { method: 'POST', endpoint: 'fs/query/manifest', json: { items: [{ path: 'a' }] } }],
     ['kapsel_rpc', { mapping_id: mappingId, family: 'vendor', operation: 'inspect', args: { value: 7 } }],
     ['kapsel_http', { method: 'POST', endpoint: `mappings/${mappingId}/rpc/vendor/inspect`, json: { args: { value: 8 } } }],
   ]) await tools[name].execute(args, ctx);
   assert.equal(calls.length, 9);
   assert.ok(calls.every(c => !c.plan_id && c.endpoint !== 'context'));
-  assert.deepEqual(calls.find(c => c.endpoint === 'fs/query/search').query.include, ['*.py', '*.js']);
-  await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read/many/../write', json: {} }, ctx));
+  assert.deepEqual(calls.find(c => c.endpoint === 'fs/query/grep').query.include, ['*.py', '*.js']);
+  await assert.rejects(tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read/files/../write', json: {} }, ctx));
   assert.equal(calls.length, 9);
 });
 
@@ -125,7 +125,7 @@ test('client mapping tools route reads, mutations, and task controls through the
         status: 'running',
       };
     }
-    if (payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234') {
+    if (payload.endpoint === 'task/get/client.abcdefghijklmnopqrstuvwx.rpc-task-1234') {
       return {
         task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234',
         kind: 'rpc',
@@ -135,7 +135,7 @@ test('client mapping tools route reads, mutations, and task controls through the
         status: 'running',
       };
     }
-    if (payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234/output') {
+    if (payload.endpoint === 'task/output/client.abcdefghijklmnopqrstuvwx.rpc-task-1234') {
       return {
         task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234',
         kind: 'rpc',
@@ -149,8 +149,8 @@ test('client mapping tools route reads, mutations, and task controls through the
       };
     }
     if (
-      payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234/interrupt'
-      || payload.endpoint === 'tasks/client.abcdefghijklmnopqrstuvwx.rpc-task-1234/kill'
+      payload.endpoint === 'task/interrupt/client.abcdefghijklmnopqrstuvwx.rpc-task-1234'
+      || payload.endpoint === 'task/kill/client.abcdefghijklmnopqrstuvwx.rpc-task-1234'
     ) return { task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234', kind: 'rpc', status: 'running' };
     if (payload.endpoint === 'mappings') return { mappings: [{
       id: 'abcdefghijklmnopqrstuvwx',
@@ -245,28 +245,28 @@ test('client mapping tools route reads, mutations, and task controls through the
   assert.equal(approvals, approvalsBeforeRpcWrite + 2);
 
   const rpcStatus = JSON.parse(await tools.kapsel_http.execute({
-    method: 'GET', endpoint: 'tasks/' + taskRpc.task_id,
+    method: 'GET', endpoint: 'task/get/' + taskRpc.task_id,
   }, ctx));
   assert.equal(rpcStatus.kind, 'rpc');
   assert.equal(rpcStatus.rpc_operation, 'task_update');
-  assert.equal(calls.at(-1).endpoint, 'tasks/' + taskRpc.task_id);
+  assert.equal(calls.at(-1).endpoint, 'task/get/' + taskRpc.task_id);
 
   const rpcOutput = JSON.parse(await tools.kapsel_task_output.execute({
     task_id: taskRpc.task_id, stdout_offset: 0,
   }, ctx));
   assert.equal(rpcOutput.kind, 'rpc');
   assert.equal(rpcOutput.stdout.data, 'progress\n');
-  assert.equal(calls.at(-1).endpoint, `tasks/${taskRpc.task_id}/output`);
+  assert.equal(calls.at(-1).endpoint, `task/output/${taskRpc.task_id}`);
 
   for (const action of ['interrupt', 'kill']) {
     await tools.kapsel_http.execute({
       method: 'POST',
-      endpoint: 'tasks/' + taskRpc.task_id + '/' + action,
+      endpoint: 'task/' + action + '/' + taskRpc.task_id,
       json: {},
       taskname: 'mapping',
       message: action + ' rpc task',
     }, ctx);
-    assert.equal(calls.at(-1).endpoint, 'tasks/' + taskRpc.task_id + '/' + action);
+    assert.equal(calls.at(-1).endpoint, 'task/' + action + '/' + taskRpc.task_id);
   }
 
   await tools.kapsel_fs_copy.execute({ source: 'file.txt', destination: 'laptop/file.txt', ...mutation }, ctx);
@@ -373,7 +373,7 @@ test('session Plans persist, remain isolated, and concurrent writes create only 
   await tools.kapsel_shell_exec.execute({ command: 'ls' }, context('session-2'));
   assert.equal(calls.at(-1).payload.plan_id, 2);
   assert.notEqual(calls[0].cwd, calls.at(-1).cwd);
-  await tools.kapsel_plan_update.execute({ plan_id: 1, status: 'completed', debrief: { summary: 'Done', outcome: 'succeeded', memory_actions: [] } }, context());
+  await tools.kapsel_plan_update.execute({ plan_id: 1, status: 'completed', debrief: { items: [], outcome: 'succeeded', memory_actions: [], memory_feedback: [], memory_conflicts: [] } }, context());
   await tools.kapsel_shell_exec.execute({ command: 'ls' }, context());
   assert.equal(calls.at(-1).payload.plan_id, 3);
 });
@@ -400,8 +400,8 @@ test('Python transport exercises real HTTP, dot paths, attribution, unicode and 
   const configured = await tools.kapsel_config.execute({ workspace_url: url, control_token: 'test_control' }, context());
   assert.doesNotMatch(configured, /test_read|test_control/);
   await tools.kapsel_fs_list.execute({ path: '.' }, context());
-  await tools.kapsel_fs_search.execute({ query: 'x', include: ['*.py', '*.js'] }, context());
-  const search = calls.find(c => c.url.includes('/fs/query/search'));
+  await tools.kapsel_fs_grep.execute({ query: 'x', include: ['*.py', '*.js'] }, context());
+  const search = calls.find(c => c.url.includes('/fs/query/grep'));
   assert.deepEqual(new URL(search.url, url).searchParams.getAll('include'), ['*.py', '*.js']);
   assert.ok(calls.some(c => c.url.includes('path=.')));
   const command = "printf '你好'\n$(touch SHOULD_NEVER_RUN) `echo bad` \\ $HOME \u0000";
