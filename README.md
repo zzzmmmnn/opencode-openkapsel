@@ -52,7 +52,7 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_docs` | On-demand reference chapters; start with `overview` |
 | `kapsel_fs_list`, `kapsel_fs_stat`, `kapsel_fs_read_files`, `kapsel_fs_grep` | Remote directory/file reads; `.` means the workspace root |
 | `kapsel_fs_write`, `kapsel_fs_replace` | Remote text creation and editing |
-| `kapsel_mappings` | Client-backed directories, connection state, and advertised execution/RPC capabilities |
+| `kapsel_mapping_list` | Client-backed directories, connection state, and advertised execution/RPC capabilities |
 | `kapsel_rpc` | Unified server/mapping RPC entry: omit `mapping_id` for the server workspace or provide it for a client mapping; sync returns directly, task returns a normal server or unified client task id; writes use OpenCode approval + Plan/Context and mapped writes require a writable mapping |
 | `kapsel_fs_copy`, `kapsel_fs_move`, `kapsel_transfer` | Cross-root file copy/move and asynchronous transfer control |
 | `kapsel_recycle` | List, restore, or explicitly purge entries in a selected recycle root |
@@ -66,7 +66,7 @@ URLs. It cannot run the CLI options or upload arbitrary host files. Binary file
 transfers and continuous SSE are not exposed as host streaming tools; use the
 documented remote APIs and output polling as applicable.
 
-For mapped directories, call `kapsel_mappings` first. Client Shell execution
+For mapped directories, call `kapsel_mapping_list` first. Client Shell execution
 uses `kapsel_shell_exec`; a mapped `cwd` with `target: "auto"` runs on that
 client and returns a unified task ID. Inspect output with `kapsel_task_output`
 and use `kapsel_http` with ordinary `/task/*` routes for status, stdin,
@@ -177,7 +177,7 @@ client mapping. Server-capable families are advertised by Discovery under
 `capabilities.mappings.rpc.families` with `server_rpc` and operation
 categories such as `sync_reads` / `task_writes`. Client mappings continue to
 publish per-operation `description`, JSON `input_schema`, boolean `write`,
-and `execution` through `kapsel_mappings`.
+and `execution` through `kapsel_mapping_list`.
 
 A server task returns a normal server task id; a mapping task returns a unified
 `client.<mapping>.<task>` id. Poll either with `kapsel_task_output`; inspect or
@@ -190,7 +190,7 @@ list/read/create/extract all use `kapsel_rpc`.
 
 The generic HTTP tool recognizes POST `fs/read/files` and `fs/query/manifest` as
 read-only. It also classifies both `rpc/<family>/<operation>` and
-`mappings/<24-char-id>/rpc/<family>/<operation>` from runtime RPC metadata, so
+`mapping/<mapping-name>/rpc/<family>/<operation>` from runtime RPC metadata, so
 RPC reads bypass mutation approval while writes use approval and Plan
 attribution. Archive preview uses generic `archive` RPC (`list`/`read`).
 Other POST operations retain their existing guard. Query values may be arrays
@@ -230,7 +230,7 @@ their existing restrictions.
 
 ## RPC-first mappings (OpenKapsel 1.61.0+)
 
-`kapsel_mappings` may report `online: true` and `mounted: false`: this is normal.
+`kapsel_mapping_list` may report `online: true` and `mounted: false`: this is normal.
 Use file, search, copy/transfer, archive and RPC tools directly; never mount a
 mapping or run a Shell command just to make those interfaces work. Static preview
 also uses RPC. Keep the default `target: "auto"`: a mapped cwd executes on its
@@ -273,7 +273,7 @@ contract. Runtime Discovery remains authoritative for server-version differences
 
 ## Structured configuration and large tables
 
-Use `kapsel_mappings` to inspect the client's `structured` and `tabular` schemas,
+Use `kapsel_mapping_list` to inspect the client's `structured` and `tabular` schemas,
 then call `kapsel_rpc`. Structured JSON/YAML/TOML edits use conditional atomic
 write/patch tasks; CSV/Excel operations are read-only, including asynchronous
 `tabular.scan`. CSV pages use authenticated seek cursors, not repeated row-offset
@@ -285,7 +285,7 @@ Read `kapsel_docs` with `topic: "data-rpc"` for the complete contract.
 
 ## SSH RPC
 
-Use `kapsel_mappings` to inspect the client's `ssh` capability, then call
+Use `kapsel_mapping_list` to inspect the client's `ssh` capability, then call
 `kapsel_rpc`. SSH profiles and credentials stay on the mapping client. The
 first operation may select a configured profile and returns a process-scoped
 `connection_id`; later `exec`, SFTP read/list/stat, upload, and download
@@ -320,4 +320,4 @@ See the bundled Context reference for direct-child limits and idempotency rules.
 
 ## OAuth browser consent is separate from this REST bridge
 
-OpenKapsel OAuth-capable MCP clients use the independent browser consent page. A user verifies ownership there with the current control token for the exact linked configuration; administrator login is not required. This plugin continues using its existing REST credentials and never submits them to a browser form or client callback. OAuth access/refresh credentials remain separate from REST credentials. Updating server consent does not require a new plugin transport or new tool. If you already have an authenticated OAuth or Static MCP connection on another platform, the server-side `credentials_get` tool can export the current REST workspace URL/control token for configuring this plugin, and `credentials_renew` can rotate that REST pair inside the normal renewal window without changing the MCP credential.
+OpenKapsel OAuth-capable MCP clients use the independent browser consent page. A user verifies ownership there with the current control token for the exact linked configuration; administrator login is not required. This plugin continues using its existing REST credentials and never submits them to a browser form or client callback. OAuth access/refresh credentials remain separate from REST credentials. Updating server consent does not require a new plugin transport or new tool. If you already have an authenticated OAuth or Static MCP connection on another platform, the server-side `credential_get` tool can export the current REST workspace URL/control token for configuring this plugin, and `credential_renew` can rotate that REST pair inside the normal renewal window without changing the MCP credential.

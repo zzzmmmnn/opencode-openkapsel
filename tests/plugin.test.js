@@ -77,7 +77,7 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
   const mappingId = 'abcdefghijklmnopqrstuvwx';
   const tools = createTools({ stateRoot: await temp(t), transport: async payload => {
     calls.push(payload);
-    if (payload.endpoint === 'mappings') return { mappings: [{
+    if (payload.endpoint === 'mapping') return { mappings: [{
       id: mappingId, name: 'laptop', writable: true,
       capabilities: { rpc: { vendor: {
         state: 'available', version: 1,
@@ -100,7 +100,7 @@ test('read RPCs bypass mutation approval, not write authorization', async (t) =>
     ['kapsel_http', { method: 'POST', endpoint: 'fs/read/files', json: { paths: ['a'] } }],
     ['kapsel_http', { method: 'POST', endpoint: 'fs/query/manifest', json: { items: [{ path: 'a' }] } }],
     ['kapsel_rpc', { mapping_id: mappingId, family: 'vendor', operation: 'inspect', args: { value: 7 } }],
-    ['kapsel_http', { method: 'POST', endpoint: `mappings/${mappingId}/rpc/vendor/inspect`, json: { args: { value: 8 } } }],
+    ['kapsel_http', { method: 'POST', endpoint: `mapping/${mappingId}/rpc/vendor/inspect`, json: { args: { value: 8 } } }],
   ]) await tools[name].execute(args, ctx);
   assert.equal(calls.length, 9);
   assert.ok(calls.every(c => !c.plan_id && c.endpoint !== 'context'));
@@ -115,7 +115,7 @@ test('client mapping tools route reads, mutations, and task controls through the
   const transport = async (payload) => {
     calls.push(payload);
     if (payload.endpoint === 'context') return { id: 7 };
-    if (payload.endpoint === 'mappings/abcdefghijklmnopqrstuvwx/rpc/vendor/task_update') {
+    if (payload.endpoint === 'mapping/abcdefghijklmnopqrstuvwx/rpc/vendor/task_update') {
       return {
         task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234',
         kind: 'rpc',
@@ -152,7 +152,7 @@ test('client mapping tools route reads, mutations, and task controls through the
       payload.endpoint === 'task/interrupt/client.abcdefghijklmnopqrstuvwx.rpc-task-1234'
       || payload.endpoint === 'task/kill/client.abcdefghijklmnopqrstuvwx.rpc-task-1234'
     ) return { task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234', kind: 'rpc', status: 'running' };
-    if (payload.endpoint === 'mappings') return { mappings: [{
+    if (payload.endpoint === 'mapping') return { mappings: [{
       id: 'abcdefghijklmnopqrstuvwx',
       name: 'laptop',
       writable: true,
@@ -199,8 +199,8 @@ test('client mapping tools route reads, mutations, and task controls through the
   const taskId = 'client-task-1234';
   const mutation = { taskname: 'mapping', message: 'test mapped storage' };
 
-  const mappings = JSON.parse(await tools.kapsel_mappings.execute({}, ctx));
-  assert.equal(calls.at(-1).endpoint, 'mappings');
+  const mappings = JSON.parse(await tools.kapsel_mapping_list.execute({}, ctx));
+  assert.equal(calls.at(-1).endpoint, 'mapping');
   assert.equal(calls.at(-1).method, 'GET');
   assert.equal(mappings.mappings[0].capabilities.rpc.vendor.description, 'Inspect or update vendor metadata.');
   assert.equal(
@@ -213,13 +213,13 @@ test('client mapping tools route reads, mutations, and task controls through the
   await tools.kapsel_rpc.execute({
     mapping_id: mappingId, family: 'vendor', operation: 'inspect', args: { value: 1 },
   }, ctx);
-  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/rpc/vendor/inspect`);
+  assert.equal(calls.at(-1).endpoint, `mapping/${mappingId}/rpc/vendor/inspect`);
   const approvalsBeforeRpcWrite = approvals;
   await tools.kapsel_rpc.execute({
     mapping_id: mappingId, family: 'vendor', operation: 'update', args: { value: 2 },
     taskname: 'mapping', message: 'update vendor metadata',
   }, ctx);
-  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/rpc/vendor/update`);
+  assert.equal(calls.at(-1).endpoint, `mapping/${mappingId}/rpc/vendor/update`);
   assert.equal(calls.at(-1).plan_id, 7);
   assert.equal(calls.at(-1).taskname, 'mapping');
   assert.equal(calls.at(-1).message, 'update vendor metadata');
@@ -237,7 +237,7 @@ test('client mapping tools route reads, mutations, and task controls through the
   assert.equal(taskRpc.kind, 'rpc');
   assert.equal(taskRpc.execution, 'task');
   assert.equal(taskRpc.task_id, 'client.' + mappingId + '.rpc-task-1234');
-  assert.equal(calls.at(-1).endpoint, `mappings/${mappingId}/rpc/vendor/task_update`);
+  assert.equal(calls.at(-1).endpoint, `mapping/${mappingId}/rpc/vendor/task_update`);
   assert.deepEqual(calls.at(-1).json, { args: { value: 3 }, timeout_seconds: 120 });
   assert.equal(calls.at(-1).plan_id, 7);
   assert.equal(calls.at(-1).taskname, 'mapping');
@@ -281,11 +281,11 @@ test('client mapping tools route reads, mutations, and task controls through the
 
   await tools.kapsel_transfer.execute({ transfer_id: 'transfer-id', action: 'status' }, ctx);
   assert.equal(calls.at(-1).method, 'GET');
-  assert.equal(calls.at(-1).endpoint, 'fs/transfers/transfer-id');
+  assert.equal(calls.at(-1).endpoint, 'fs/transfer/transfer-id');
   for (const action of ['cancel', 'resume']) {
     await tools.kapsel_transfer.execute({ transfer_id: 'transfer-id', action }, ctx);
     assert.equal(calls.at(-1).method, 'POST');
-    assert.equal(calls.at(-1).endpoint, `fs/transfers/transfer-id/${action}`);
+    assert.equal(calls.at(-1).endpoint, `fs/transfer/transfer-id/${action}`);
   }
   await tools.kapsel_recycle.execute({ action: 'list', root: 'laptop', offset: 2, limit: 10 }, ctx);
   assert.deepEqual(calls.at(-1).query, { root: 'laptop', offset: 2, limit: 10 });
@@ -303,7 +303,7 @@ test('client mapping tools route reads, mutations, and task controls through the
   const approvalEligible = calls.filter(call =>
     ['POST', 'PUT', 'PATCH', 'DELETE'].includes(call.method)
     && call.endpoint !== 'context'
-    && call.endpoint !== `mappings/${mappingId}/rpc/vendor/inspect`
+    && call.endpoint !== `mapping/${mappingId}/rpc/vendor/inspect`
   ).length;
   assert.equal(approvals, approvalEligible);
 });
@@ -313,7 +313,7 @@ test('read-only agent denies client mapping mutations before Plan creation or HT
   const mappingId = 'abcdefghijklmnopqrstuvwx';
   const tools = createTools({ stateRoot: await temp(t), transport: async payload => {
     calls.push(payload);
-    if (payload.endpoint === 'mappings') return { mappings: [{
+    if (payload.endpoint === 'mapping') return { mappings: [{
       id: mappingId, name: 'laptop', writable: true,
       capabilities: { rpc: { vendor: {
         state: 'available', operations: ['update'],
@@ -342,11 +342,11 @@ test('read-only agent denies client mapping mutations before Plan creation or HT
     }, denied),
     /approval denied/,
   );
-  assert.deepEqual(calls.map(call => [call.method, call.endpoint]), [['GET', 'mappings']]);
+  assert.deepEqual(calls.map(call => [call.method, call.endpoint]), [['GET', 'mapping']]);
   assert.equal(calls.some(call => call.endpoint === 'context'), false);
   assert.equal(calls.some(call => call.endpoint.endsWith('/rpc/vendor/update')), false);
 
-  await tools.kapsel_mappings.execute({}, denied);
+  await tools.kapsel_mapping_list.execute({}, denied);
   await tools.kapsel_recycle.execute({ action: 'list' }, denied);
   assert.deepEqual(calls.map(call => call.method), ['GET', 'GET', 'GET']);
 });
@@ -446,7 +446,7 @@ test('automatic renewal persists new tokens, serializes calls, and redacts Disco
   const server = createServer((req, res) => {
     auths.push(req.headers.authorization);
     res.setHeader('Content-Type', 'application/json');
-    if (req.url.endsWith('/credentials/renew')) {
+    if (req.url.endsWith('/credential/renew')) {
       renewals++;
       res.end(JSON.stringify({ workspace_url: base + '/w/new_read', control_token: 'new_control', credentials_expires_at: new Date(Date.now() + 3 * 86400000).toISOString() }));
     } else res.end(JSON.stringify({
