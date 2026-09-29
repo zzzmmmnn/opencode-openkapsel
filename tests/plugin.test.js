@@ -150,7 +150,7 @@ test('client mapping tools route reads, mutations, and task controls through the
     }
     if (
       payload.endpoint === 'task/interrupt/client.abcdefghijklmnopqrstuvwx.rpc-task-1234'
-      || payload.endpoint === 'task/kill/client.abcdefghijklmnopqrstuvwx.rpc-task-1234'
+      || payload.endpoint === 'task/client.abcdefghijklmnopqrstuvwx.rpc-task-1234'
     ) return { task_id: 'client.abcdefghijklmnopqrstuvwx.rpc-task-1234', kind: 'rpc', status: 'running' };
     if (payload.endpoint === 'mapping') return { mappings: [{
       id: 'abcdefghijklmnopqrstuvwx',
@@ -258,16 +258,23 @@ test('client mapping tools route reads, mutations, and task controls through the
   assert.equal(rpcOutput.stdout.data, 'progress\n');
   assert.equal(calls.at(-1).endpoint, `task/output/${taskRpc.task_id}`);
 
-  for (const action of ['interrupt', 'kill']) {
-    await tools.kapsel_http.execute({
-      method: 'POST',
-      endpoint: 'task/' + action + '/' + taskRpc.task_id,
-      json: {},
-      taskname: 'mapping',
-      message: action + ' rpc task',
-    }, ctx);
-    assert.equal(calls.at(-1).endpoint, 'task/' + action + '/' + taskRpc.task_id);
-  }
+  await tools.kapsel_http.execute({
+    method: 'POST',
+    endpoint: 'task/interrupt/' + taskRpc.task_id,
+    json: {},
+    taskname: 'mapping',
+    message: 'interrupt rpc task',
+  }, ctx);
+  assert.equal(calls.at(-1).endpoint, 'task/interrupt/' + taskRpc.task_id);
+
+  await tools.kapsel_http.execute({
+    method: 'DELETE',
+    endpoint: 'task/' + taskRpc.task_id,
+    json: {},
+    taskname: 'mapping',
+    message: 'kill rpc task',
+  }, ctx);
+  assert.equal(calls.at(-1).endpoint, 'task/' + taskRpc.task_id);
 
   await tools.kapsel_fs_copy.execute({ source: 'file.txt', destination: 'laptop/file.txt', ...mutation }, ctx);
   assert.deepEqual(calls.at(-1).json, { source: 'file.txt', destination: 'laptop/file.txt' });
