@@ -15,6 +15,7 @@ async function fixture(t, { deny = false, failure, response, contextResponse, di
   const tools = createTools({ stateRoot, transport: async payload => {
     calls.push(payload);
     if (failure) throw new Error(failure);
+    if (payload.endpoint === 'conversation') return payload.method === 'GET' ? { next_conversation_id: 0 } : { conversation_id: 0, writer_nonce: '@Ab12@' };
     if (payload.endpoint === 'context') return contextResponse ?? { id: 7 };
     if (payload.endpoint === '/' && discoveryResponse) return discoveryResponse;
     return response ?? { task_id: 'task_test', location: 'server' };
@@ -177,7 +178,7 @@ test('atomic Plan requests and child receipts pass through without an automatic 
   ] };
   const f = await fixture(t, { contextResponse: receipt });
   const json = { type: 'plan', taskname: 'feature', content: 'Implement', request_id: 'feature-01',
-    subplans: [{ ref: 'code', content: 'Code' }, { ref: 'tests', content: 'Verify' }] };
+    subplans: [{ ref: 'code', content: 'Code' }, { ref: 'tests', content: 'Verify' }], conversation_id: 0, writer_nonce: '@Ab12@', conversation_entries: [{ role: 'ai', content: 'Start feature.' }] };
   const result = JSON.parse(await f.tools.kapsel_http.execute({ method: 'POST', endpoint: 'context', json }, f.ctx));
   assert.deepEqual(result, receipt);
   assert.equal(f.calls.length, 1);
@@ -191,7 +192,7 @@ test('atomic Plan requests and child receipts pass through without an automatic 
 
 test('atomic Plan requests keep approvals and never replay an uncertain creation', async t => {
   const args = { method: 'POST', endpoint: 'context', json: { type: 'plan', taskname: 'feature', content: 'Once',
-    request_id: 'feature-02', subplans: [{ ref: 'child', content: 'Child' }] } };
+    request_id: 'feature-02', subplans: [{ ref: 'child', content: 'Child' }], conversation_id: 0, writer_nonce: '@Ab12@', conversation_entries: [{ role: 'ai', content: 'Start feature.' }] } };
   const denied = await fixture(t, { deny: true });
   await assert.rejects(denied.tools.kapsel_http.execute(args, denied.ctx), /approval denied/);
   assert.equal(denied.calls.length, 0);
@@ -199,4 +200,40 @@ test('atomic Plan requests keep approvals and never replay an uncertain creation
   await assert.rejects(failed.tools.kapsel_http.execute(args, failed.ctx), /response lost/);
   assert.equal(failed.calls.length, 1);
   assert.equal(failed.calls[0].json.request_id, 'feature-02');
+});
+
+test('automatic Plan creation opens Conversation and includes writer nonce and subplans', async t => {
+  const f = await fixture(t);
+  const receipt = JSON.parse(await f.tools.kapsel_http.execute({
+    method: 'POST', endpoint: 'context', json: { type: 'plan', taskname: 'bootstrap', content: 'Start job' },
+  }, f.ctx));
+  assert.equal(receipt.id, 7);
+  assert.deepEqual(f.calls.map(c => [c.method, c.endpoint]), [
+    ['GET', 'conversation'], ['POST', 'conversation'], ['POST', 'context'],
+  ]);
+  assert.equal(f.calls[1].json.conversation_id, 0);
+  assert.match(f.calls[1].json.request_id, /^opencode-[a-f0-9]{20}-0$/);
+  assert.equal(f.calls[2].json.conversation_id, 0);
+  assert.equal(f.calls[2].json.writer_nonce, '@Ab12@');
+  assert.deepEqual(f.calls[2].json.subplans, []);
+});
+
+test('Plan update rejects parent changes and requires expected revision and Conversation', async t => {
+  const f = await fixture(t);
+  const plan = f.tools.kapsel_plan_update;
+  const schema = tool.schema.object(plan.args);
+  assert.ok(schema.safeParse({ plan_id: 7, content: 'New' }).success === false);
+  assert.ok(!Object.hasOwn(plan.args, 'parent_plan_id'));
+  assert.ok(!Object.hasOwn(plan.args, 'move_to_root'));
+  await assert.rejects(plan.execute({ plan_id: 7, content: 'New' }, f.ctx), /expected_revision/);
+  assert.equal(f.calls.length, 0);
+  await plan.execute({ plan_id: 7, expected_revision: 2, content: 'New' }, f.ctx);
+  assert.deepEqual(f.calls.map(c => c.endpoint), ['conversation', 'conversation', 'context/plans/7']);
+  const body = f.calls.at(-1).json;
+  assert.equal(body.expected_revision, 2);
+  assert.equal(body.conversation_id, 0);
+  assert.equal(body.writer_nonce, '@Ab12@');
+  assert.equal(body.conversation_entries[0].role, 'ai');
+  assert.equal(body.plan_id, undefined);
+  assert.match(await f.tools.kapsel_docs.execute({ topic: 'request-transport' }, f.ctx), /response_mode=envelope/);
 });

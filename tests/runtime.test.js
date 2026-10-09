@@ -32,7 +32,7 @@ test('real OpenCode loads agents and executes remote tools with mock inference',
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify(req.url.endsWith('/context') ? { id: 7 } : req.url.endsWith('/shell/exec') ? { task_id: 'remote-task' } : {
         name: 'Runtime test', capabilities: { shell: true },
-        authentication: { control_token_expires_at: new Date(Date.now() + 3 * 86400000).toISOString() },
+        authentication: { credentials_expires_at: new Date(Date.now() + 3 * 86400000).toISOString() },
       }));
       return;
     }

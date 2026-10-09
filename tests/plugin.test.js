@@ -114,6 +114,7 @@ test('client mapping tools route reads, mutations, and task controls through the
   let approvals = 0;
   const transport = async (payload) => {
     calls.push(payload);
+    if (payload.endpoint === 'conversation') return payload.method === 'GET' ? { next_conversation_id: 0 } : { conversation_id: 0, writer_nonce: '@Ab12@' };
     if (payload.endpoint === 'context') return { id: 7 };
     if (payload.endpoint === 'mapping/abcdefghijklmnopqrstuvwx/rpc/vendor/task_update') {
       return {
@@ -310,6 +311,7 @@ test('client mapping tools route reads, mutations, and task controls through the
   const approvalEligible = calls.filter(call =>
     ['POST', 'PUT', 'PATCH', 'DELETE'].includes(call.method)
     && call.endpoint !== 'context'
+    && call.endpoint !== 'conversation'
     && call.endpoint !== `mapping/${mappingId}/rpc/vendor/inspect`
   ).length;
   assert.equal(approvals, approvalEligible);
@@ -364,6 +366,7 @@ test('session Plans persist, remain isolated, and concurrent writes create only 
   let nextPlan = 1;
   const transport = async (payload, options) => {
     calls.push({ payload, cwd: options.cwd });
+    if (payload.endpoint === 'conversation') return payload.method === 'GET' ? { next_conversation_id: nextPlan } : { conversation_id: payload.json.conversation_id, writer_nonce: '@Ab12@' };
     if (payload.endpoint === 'context') return { id: nextPlan++ };
     return { ok: true };
   };
@@ -380,7 +383,7 @@ test('session Plans persist, remain isolated, and concurrent writes create only 
   await tools.kapsel_shell_exec.execute({ command: 'ls' }, context('session-2'));
   assert.equal(calls.at(-1).payload.plan_id, 2);
   assert.notEqual(calls[0].cwd, calls.at(-1).cwd);
-  await tools.kapsel_plan_update.execute({ plan_id: 1, status: 'completed', debrief: { items: [], outcome: 'succeeded', memory_actions: [], memory_feedback: [], memory_conflicts: [] } }, context());
+  await tools.kapsel_plan_update.execute({ plan_id: 1, expected_revision: 1, status: 'completed', debrief: { items: [], outcome: 'succeeded', memory_actions: [], memory_feedback: [], memory_conflicts: [] } }, context());
   await tools.kapsel_shell_exec.execute({ command: 'ls' }, context());
   assert.equal(calls.at(-1).payload.plan_id, 3);
 });
@@ -393,10 +396,11 @@ test('Python transport exercises real HTTP, dot paths, attribution, unicode and 
     calls.push({ url: req.url, auth: req.headers.authorization, body: body ? JSON.parse(body) : null });
     res.setHeader('Content-Type', 'application/json');
     if (req.url.includes('fail')) { res.statusCode = 400; res.end(JSON.stringify({ error: { message: 'bad request' } })); return; }
+    if (req.url.endsWith('/conversation')) { res.end(JSON.stringify(req.method === 'GET' ? { next_conversation_id: 0 } : { conversation_id: 0, writer_nonce: '@Ab12@' })); return; }
     if (req.url.endsWith('/context')) { res.end(JSON.stringify({ id: 42 })); return; }
     if (req.url.includes('/text')) { res.setHeader('Content-Type', 'text/plain'); res.end('Hello 中文'); return; }
     if (req.url.includes('/redirect')) { res.statusCode = 302; res.setHeader('Location', '/escaped'); res.end(); return; }
-    res.end(JSON.stringify({ name: 'Test', entries: ['a.txt'], capabilities: { shell: true }, authentication: { control_token_expires_at: new Date(Date.now() + 3 * 86400000).toISOString() } }));
+    res.end(JSON.stringify({ name: 'Test', entries: ['a.txt'], capabilities: { shell: true }, authentication: { credentials_expires_at: new Date(Date.now() + 3 * 86400000).toISOString() } }));
   });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -459,7 +463,7 @@ test('automatic renewal persists new tokens, serializes calls, and redacts Disco
     } else res.end(JSON.stringify({
       name: 'Renewal test', control_token: renewals ? 'new_control' : 'old_control',
       workspace_url: base + '/w/' + (renewals ? 'new_read' : 'old_read'),
-      authentication: { control_token_expires_at: new Date(Date.now() + 86400000).toISOString() },
+      authentication: { credentials_expires_at: new Date(Date.now() + 86400000).toISOString() },
     }));
   });
   server.listen(0, '127.0.0.1');
@@ -473,7 +477,7 @@ test('automatic renewal persists new tokens, serializes calls, and redacts Disco
   assert.equal(renewals, 1);
   assert.equal(auths.at(-1), 'Bearer new_control');
   assert.doesNotMatch(results.join(''), /new_control|old_control|new_read|old_read/);
-  assert.match(JSON.parse(results[0]).authentication.control_token_expires_at, /^\d{4}-\d{2}-\d{2}T/);
+  assert.match(JSON.parse(results[0]).authentication.credentials_expires_at, /^\d{4}-\d{2}-\d{2}T/);
   const dir = join(stateRoot, (await readdir(stateRoot))[0]);
   assert.match(await readFile(join(dir, '.openkapsel.env'), 'utf8'), /new_control/);
 });
