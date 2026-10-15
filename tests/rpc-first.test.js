@@ -237,3 +237,41 @@ test('Plan update rejects parent changes and requires expected revision and Conv
   assert.equal(body.plan_id, undefined);
   assert.match(await f.tools.kapsel_docs.execute({ topic: 'request-transport' }, f.ctx), /response_mode=envelope/);
 });
+
+test('indexed fs_find accepts native sort/glob options and works in read-only mode', async t => {
+  const f = await fixture(t, { deny: true });
+  const schema = tool.schema.object(f.tools.kapsel_fs_find.args);
+  assert.equal(schema.safeParse({ path: '.', max_results: 1001 }).success, false);
+  await f.tools.kapsel_fs_find.execute({ path: 'laptop', mode: 'glob', query: '*.py',
+    sort_by: 'modified', sort_order: 'desc', max_results: 25 }, f.ctx);
+  await f.tools.kapsel_fs_find.execute({ path: '.', max_results: 5 }, f.ctx);
+  assert.deepEqual(f.calls.map(c => c.endpoint), ['fs/query/find', 'fs/query/find']);
+  assert.deepEqual(f.calls[0].query, { path: 'laptop', mode: 'glob', query: '*.py',
+    sort_by: 'modified', sort_order: 'desc', max_results: 25 });
+  assert.equal(f.approvals(), 0);
+});
+
+test('Shell/File approval tools request URLs separately and approved operations bind nonce', async t => {
+  const f = await fixture(t);
+  await f.tools.kapsel_shell_request_approval.execute({ target: 'server', reason: 'Run tests', plan_id: 7 }, f.ctx);
+  assert.deepEqual(f.calls.map(c => c.endpoint), ['conversation', 'conversation', 'shell/approval/request']);
+  assert.deepEqual(f.calls[2].json, { target: 'server', reason: 'Run tests', writer_nonce: '@Ab12@' });
+  assert.equal(f.calls[2].plan_id, 7);
+  await f.tools.kapsel_shell_exec.execute({ command: 'true', target: 'server', approved: true, plan_id: 7 }, f.ctx);
+  assert.equal(f.calls.at(-1).json.approved, true);
+  assert.equal(f.calls.at(-1).json.writer_nonce, '@Ab12@');
+  await f.tools.kapsel_files_request_approval.execute({
+    access: 'read', target: 'laptop', reason: 'Read external tree', path: '/Users',
+    scope_is_directory: true, plan_id: 7,
+  }, f.ctx);
+  assert.equal(f.calls.at(-1).endpoint, 'files/approval/request');
+  assert.equal(f.calls.at(-1).json.writer_nonce, '@Ab12@');
+  assert.equal(f.calls.at(-1).json.path, '/Users');
+  await f.tools.kapsel_http.execute({ method: 'POST', endpoint: 'files/approval/request',
+    json: { access: 'write', target: 'server', reason: 'Edit temporary file' }, plan_id: 7 }, f.ctx);
+  assert.equal(f.calls.at(-1).json.writer_nonce, '@Ab12@');
+  await f.tools.kapsel_http.execute({ method: 'POST', endpoint: 'fs/read/files',
+    json: { paths: ['/Users/test.txt'], target: 'laptop', approved: true }, plan_id: 7 }, f.ctx);
+  assert.equal(f.calls.at(-1).json.writer_nonce, '@Ab12@');
+  assert.equal(f.calls.at(-1).plan_id, 7);
+});
