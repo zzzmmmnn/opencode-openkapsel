@@ -174,6 +174,13 @@ Mapping ID and a specific `reason`. The response may include an
 approval URL. An omitted Shell timeout defaults to 120 seconds; explicitly
 provided finite positive timeouts are not capped by the old client maximum.
 
+For generic function-owned Approval use `kapsel_function_request_approval` with
+a registered `function`, exact `target`, function-specific `args`, and `reason`.
+The adapter supplies the private Conversation writer nonce and owning Plan; the
+returned approval URL does not execute the function. Approval never bypasses
+explicit sandbox read-only or deny path rules. Completed Plans are immutable;
+create a new Plan for later work while modifying existing Memory independently.
+
 For File read/write grants, use `kapsel_files_request_approval` with
 `access: "read"|"write"`, explicit `target`, `reason`, and optionally an
 absolute external `path` (set `scope_is_directory: false` for a file alias).

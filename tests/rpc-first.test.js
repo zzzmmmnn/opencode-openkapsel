@@ -11,10 +11,10 @@ async function fixture(t, { deny = false, failure, response, contextResponse, di
   const stateRoot = await mkdtemp(join(tmpdir(), 'opencode-rpc-first-'));
   t.after(() => rm(stateRoot, { recursive: true, force: true }));
   const calls = [];
-  let approvals = 0;
+  let approvals = 0, activeFailure = failure;
   const tools = createTools({ stateRoot, transport: async payload => {
     calls.push(payload);
-    if (failure) throw new Error(failure);
+    if (activeFailure) throw new Error(activeFailure);
     if (payload.endpoint === 'conversation') return payload.method === 'GET' ? { next_conversation_id: 0 } : { conversation_id: 0, writer_nonce: '@Ab12@' };
     if (payload.endpoint === 'context') return contextResponse ?? { id: 7 };
     if (payload.endpoint === '/' && discoveryResponse) return discoveryResponse;
@@ -22,7 +22,7 @@ async function fixture(t, { deny = false, failure, response, contextResponse, di
   } });
   const ctx = { sessionID: 'rpc-first-test', agent: deny ? READONLY_AGENT : AGENT,
     abort: new AbortController().signal, ask: async () => { approvals++; if (deny) throw new Error('approval denied'); } };
-  return { tools, calls, ctx, approvals: () => approvals };
+  return { tools, calls, ctx, approvals: () => approvals, fail: value => { activeFailure = value; } };
 }
 
 test('typed Shell schema and request preserve optional mapping dependencies and defaults', async t => {
@@ -274,4 +274,44 @@ test('Shell/File approval tools request URLs separately and approved operations 
     json: { paths: ['/Users/test.txt'], target: 'laptop', approved: true }, plan_id: 7 }, f.ctx);
   assert.equal(f.calls.at(-1).json.writer_nonce, '@Ab12@');
   assert.equal(f.calls.at(-1).plan_id, 7);
+});
+
+
+test('function-owned approval binds private nonce on typed and arbitrary REST paths', async t => {
+  const f = await fixture(t);
+  const fn = f.tools.kapsel_function_request_approval;
+  const schema = tool.schema.object(fn.args);
+  assert.equal(schema.safeParse({ function: 'bad', target: 'server', reason: 'Why' }).success, false);
+  await assert.rejects(fn.execute({ function: 'files.write', target: 'auto', reason: 'Why', plan_id: 7 }, f.ctx), /never auto/);
+  assert.equal(f.calls.length, 0);
+  await fn.execute({ function: 'files.write', target: 'laptop',
+    args: { path: '/Users', access: 'write' }, reason: 'Plugin work', plan_id: 7 }, f.ctx);
+  assert.deepEqual(f.calls.map(c => c.endpoint), ['conversation', 'conversation', 'function/approval/request']);
+  assert.deepEqual(f.calls[2].json, { function: 'files.write', target: 'laptop',
+    args: { path: '/Users', access: 'write' }, reason: 'Plugin work', writer_nonce: '@Ab12@' });
+  assert.equal(f.calls[2].plan_id, 7);
+  await f.tools.kapsel_http.execute({
+    method: 'POST', endpoint: '/function/approval/request', plan_id: 7,
+    json: { function: 'shell.exec', target: 'server', reason: 'Test', args: {}, writer_nonce: '@Wrong@' },
+  }, f.ctx);
+  assert.equal(f.calls.at(-1).json.writer_nonce, '@Ab12@');
+  assert.equal(f.calls.at(-1).plan_id, 7);
+  assert.match(PROMPT, /kapsel_function_request_approval/);
+  assert.match(await f.tools.kapsel_docs.execute({ topic: 'context' }, f.ctx), /completed Plan is immutable/i);
+});
+
+test('closed cached Plan is invalidated without replay after terminal server rejection', async t => {
+  const f = await fixture(t);
+  await f.tools.kapsel_fs_write.execute({ path: 'a.txt', content: 'one' }, f.ctx);
+  const created = f.calls.filter(c => c.endpoint === 'context' && c.method === 'POST');
+  assert.equal(created.length, 1);
+  f.fail('completed plan cannot be modified');
+  const count = f.calls.length;
+  await assert.rejects(f.tools.kapsel_fs_write.execute({ path: 'b.txt', content: 'once' }, f.ctx), /completed plan cannot be modified/);
+  assert.equal(f.calls.length, count + 1);
+  f.fail(null);
+  const status = JSON.parse(await f.tools.kapsel_status.execute({}, f.ctx));
+  assert.equal(status.plan_id, null);
+  await f.tools.kapsel_fs_write.execute({ path: 'c.txt', content: 'new plan' }, f.ctx);
+  assert.equal(f.calls.filter(c => c.endpoint === 'context' && c.method === 'POST').length, 2);
 });
