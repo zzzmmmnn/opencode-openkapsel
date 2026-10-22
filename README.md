@@ -59,7 +59,7 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_shell_exec`, `kapsel_task_output` | Server or mapped-client Shell execution and incremental output polling |
 | `kapsel_shell_request_approval`, `kapsel_files_request_approval` | Request separate unsandboxed Shell and scoped File read/write grants; return approval URLs but do not execute operations |
 | `kapsel_plan_update` | Plan updates and completion with a structured debrief; parentage is immutable |
-| `kapsel_http` | Remaining REST APIs: directories, recycle bin, batch edits, Memory, sharing, schedules, preview, environment configuration, and other endpoints |
+| `kapsel_http` | Remaining REST APIs: directories, recycle bin, batch edits, Memory, schedules, preview, environment configuration, and other endpoints |
 
 Put endpoint-specific request fields inside the `json` object of `kapsel_http`.
 It accepts workspace-relative endpoints and same-origin absolute transfer-ticket
@@ -347,10 +347,10 @@ The OpenCode bridge creates a Conversation when needed for automatic Plan manage
 
 ## Atomic plan batches
 
-On a server advertising `capabilities.context.plan_creation.atomic_subplans`,
+On a server advertising `capabilities.context.plan_creation.atomic_todos`,
 use `kapsel_http` once with `method: "POST"`, `endpoint: "context"` and `json`
 containing `type: "plan"`, `taskname`, `content`, optional `request_id`, and
-`subplans: [{"ref":"code","content":"Implement"},{"ref":"tests","content":"Verify"}]`.
+`todos: [{"ref":"code","content":"Implement"},{"ref":"tests","content":"Verify"}]`.
 The response returns the parent `id` and every child's `id`/`plan_id`/`ref`.
 Pass a returned child ID to subsequent mutation tools; no extra Plan creation is
 necessary. Do not put endpoint fields beside `json`.

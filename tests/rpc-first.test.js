@@ -173,12 +173,12 @@ test('bundled references and agent prompt describe RPC-first dependencies and er
 
 
 test('atomic Plan requests and child receipts pass through without an automatic extra Plan', async t => {
-  const receipt = { id: 20, request_id: 'feature-01', replayed: false, subplans: [
+  const receipt = { id: 20, request_id: 'feature-01', replayed: false, todos: [
     { index: 0, ref: 'code', id: 21, plan_id: 20 }, { index: 1, ref: 'tests', id: 22, plan_id: 20 },
   ] };
   const f = await fixture(t, { contextResponse: receipt });
   const json = { type: 'plan', taskname: 'feature', content: 'Implement', request_id: 'feature-01',
-    subplans: [{ ref: 'code', content: 'Code' }, { ref: 'tests', content: 'Verify' }], conversation_id: 0, writer_nonce: '@Ab12@', conversation_entries: [{ role: 'ai', content: 'Start feature.' }] };
+    todos: [{ ref: 'code', content: 'Code' }, { ref: 'tests', content: 'Verify' }], conversation_id: 0, writer_nonce: '@Ab12@', conversation_entries: [{ role: 'ai', content: 'Start feature.' }] };
   const result = JSON.parse(await f.tools.kapsel_http.execute({ method: 'POST', endpoint: 'context', json }, f.ctx));
   assert.deepEqual(result, receipt);
   assert.equal(f.calls.length, 1);
@@ -186,13 +186,26 @@ test('atomic Plan requests and child receipts pass through without an automatic 
   assert.equal(f.calls[0].endpoint, 'context');
   assert.equal(f.calls[0].plan_id, undefined);
   assert.equal(f.approvals(), 1);
-  assert.match(await f.tools.kapsel_docs.execute({ topic: 'context' }, f.ctx), /Create a plan and direct subplans in one call/);
-  assert.match(PROMPT, /subplans.*request_id/);
+  assert.match(await f.tools.kapsel_docs.execute({ topic: 'context' }, f.ctx), /Create a Plan and its executable todo checklist/);
+  assert.match(PROMPT, /todos.*request_id/);
+});
+
+test('legacy REST subplans pass through without automatic todos injection', async t => {
+  const receipt = { id: 30, todos: [{ index: 0, id: 31, plan_id: 30 }] };
+  const f = await fixture(t, { contextResponse: receipt });
+  const json = { type: 'plan', taskname: 'legacy', content: 'Maintain REST compatibility',
+    subplans: [{ content: 'Existing caller' }], conversation_id: 0,
+    writer_nonce: '@Ab12@', conversation_entries: [{ role: 'ai', content: 'Legacy REST plan.' }] };
+  const result = JSON.parse(await f.tools.kapsel_http.execute({ method: 'POST', endpoint: 'context', json }, f.ctx));
+  assert.deepEqual(result, receipt);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0].json, json);
+  assert.equal(Object.hasOwn(f.calls[0].json, 'todos'), false);
 });
 
 test('atomic Plan requests keep approvals and never replay an uncertain creation', async t => {
   const args = { method: 'POST', endpoint: 'context', json: { type: 'plan', taskname: 'feature', content: 'Once',
-    request_id: 'feature-02', subplans: [{ ref: 'child', content: 'Child' }], conversation_id: 0, writer_nonce: '@Ab12@', conversation_entries: [{ role: 'ai', content: 'Start feature.' }] } };
+    request_id: 'feature-02', todos: [{ ref: 'child', content: 'Child' }], conversation_id: 0, writer_nonce: '@Ab12@', conversation_entries: [{ role: 'ai', content: 'Start feature.' }] } };
   const denied = await fixture(t, { deny: true });
   await assert.rejects(denied.tools.kapsel_http.execute(args, denied.ctx), /approval denied/);
   assert.equal(denied.calls.length, 0);
@@ -202,7 +215,7 @@ test('atomic Plan requests keep approvals and never replay an uncertain creation
   assert.equal(failed.calls[0].json.request_id, 'feature-02');
 });
 
-test('automatic Plan creation opens Conversation and includes writer nonce and subplans', async t => {
+test('automatic Plan creation opens Conversation and includes writer nonce and todos', async t => {
   const f = await fixture(t);
   const receipt = JSON.parse(await f.tools.kapsel_http.execute({
     method: 'POST', endpoint: 'context', json: { type: 'plan', taskname: 'bootstrap', content: 'Start job' },
@@ -215,7 +228,7 @@ test('automatic Plan creation opens Conversation and includes writer nonce and s
   assert.match(f.calls[1].json.request_id, /^opencode-[a-f0-9]{20}-0$/);
   assert.equal(f.calls[2].json.conversation_id, 0);
   assert.equal(f.calls[2].json.writer_nonce, '@Ab12@');
-  assert.deepEqual(f.calls[2].json.subplans, []);
+  assert.deepEqual(f.calls[2].json.todos, []);
 });
 
 test('Plan update rejects parent changes and requires expected revision and Conversation', async t => {
@@ -235,7 +248,7 @@ test('Plan update rejects parent changes and requires expected revision and Conv
   assert.equal(body.writer_nonce, '@Ab12@');
   assert.equal(body.conversation_entries[0].role, 'ai');
   assert.equal(body.plan_id, undefined);
-  assert.match(await f.tools.kapsel_docs.execute({ topic: 'request-transport' }, f.ctx), /response_mode=envelope/);
+  assert.match(await f.tools.kapsel_docs.execute({ topic: 'restricted-http' }, f.ctx), /response_mode=envelope/);
 });
 
 test('indexed fs_find accepts native sort/glob options and works in read-only mode', async t => {
