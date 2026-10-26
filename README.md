@@ -62,10 +62,13 @@ session to a different workspace. Two sessions can connect to different tokens.
 | `kapsel_http` | Remaining REST APIs: directories, recycle bin, batch edits, Memory, schedules, preview, environment configuration, and other endpoints |
 
 Put endpoint-specific request fields inside the `json` object of `kapsel_http`.
-It accepts workspace-relative endpoints and same-origin absolute transfer-ticket
-URLs. It cannot run the CLI options or upload arbitrary host files. Binary file
-transfers and continuous SSE are not exposed as host streaming tools; use the
-documented remote APIs and output polling as applicable.
+It accepts only workspace-relative REST endpoints. Legacy absolute `/transfer/*`
+URLs are no longer supported by OpenKapsel; use the current `/fs/content`,
+`/upload/*` and `/fs/transfer/*` routes from `kapsel_docs`. The OpenCode bridge
+cannot stream arbitrary host files or run CLI upload helpers. Its generic HTTP
+tool sends JSON, not raw upload bytes; use a separately authorized transfer-capable
+environment for binary uploads. Continuous SSE is likewise not exposed as a
+host streaming tool; use task/output polling.
 
 For mapped directories, call `kapsel_mapping_list` first. Client Shell execution
 uses `kapsel_shell_exec`; a mapped `cwd` with `target: "auto"` runs on that

@@ -1,18 +1,18 @@
-# Upstream REST helpers
+# Vendored OpenKapsel REST skill
 
-`openkapsel-rest/` is synchronized from `zzzmmmnn/OpenKapsel`, directory
-`skills/openkapsel-rest`, including the vendored `agents/` metadata. The base
-revision is OpenKapsel `9c205e1cc5e20455f9197761fd06f974fa61ef72`
-(version 2.3.0), with later OpenKapsel 2.3.2-compatible documentation
-addenda in `references/context.md` (terminal Plan immutability) and
-`references/files.md` (generic Function Approval, scoped `ro` elevation,
-independent `protect` approvals, and absolute `deny` precedence) in addition
-to prior File and Shell documentation corrections. Approval URLs last thirty
-minutes; the default post-approval grant remains ten minutes. These addenda are maintained
-locally until the full upstream skill snapshot is refreshed; they are not
-claimed to be byte-identical to the base upstream revision.
-The upstream project is the authoritative source for this REST contract and
-Python client. Update the snapshot together; do not fork the protocol here.
+`vendor/openkapsel-rest/` is synchronized from `zzzmmmnn/OpenKapsel`,
+`skills/openkapsel-rest/`, at source commit
+`f4208159cb22bbaf13116271b0c01692103bd72c` (OpenKapsel 2.4.0).
+All tracked Markdown references, SKILL.md, and Python upload/config/HTTP helpers
+are byte-identical to that upstream source; OS-generated caches and metadata
+are excluded. Update the entire snapshot together to avoid protocol drift.
 
-The OpenCode adapter invokes only the config and HTTP helpers. Upload scripts
-remain as reference material; they are not exposed as host-file upload tools.
+The OpenCode adapter invokes only the config and HTTP helpers from the
+vendored skill. The upload scripts are included as protocol documentation
+and cannot access or upload arbitrary host files through OpenCode tools.
+Use current workspace-relative endpoints: `fs/content` for raw file bytes,
+`upload/create`, `upload/status/<id>`, `upload/chunk/<id>`,
+`upload/commit/<id>` and `upload/cancel/<id>` for resumable transfer, and
+`fs/transfer/<id>` for asynchronous cross-root copy/move tracking.
+Deprecated service-origin `/transfer/*` aliases and `/uploads/*` routes
+are not supported by this adapter.

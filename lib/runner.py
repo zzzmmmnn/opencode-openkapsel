@@ -43,12 +43,7 @@ def main():
             credentials = config.resolve_credentials(env_file=credential_file)
             parsed = urlsplit(endpoint)
             if parsed.scheme or parsed.netloc:
-                base = urlsplit(credentials.base_url)
-                if (parsed.scheme, parsed.netloc) != (base.scheme, base.netloc):
-                    raise ValueError('absolute URLs must use the configured OpenKapsel origin')
-                prefix = base.path.rsplit('/w/', 1)[0] + '/transfer/'
-                if not parsed.path.startswith(prefix):
-                    raise ValueError('absolute URLs are allowed only for OpenKapsel transfer tickets')
+                raise ValueError('absolute URLs are unsupported; use workspace-relative OpenKapsel REST endpoints')
             args = [payload['method'], endpoint, '--env-file', str(credential_file), '--auth', 'control']
             for key, value in payload.get('query', {}).items():
                 if value is not None:

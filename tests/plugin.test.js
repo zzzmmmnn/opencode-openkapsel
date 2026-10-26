@@ -48,7 +48,7 @@ test('schemas reject string JSON and docs path traversal', async () => {
 });
 
 test('endpoint traversal, scheme and control character checks', () => {
-  for (const value of ['../admin', '%2e%2e/admin', '%252e%252e/admin', 'fs/%00', '//evil.test/x', 'file:///etc/passwd', '--output', 'fs\\..\\admin']) {
+  for (const value of ['../admin', '%2e%2e/admin', '%252e%252e/admin', 'fs/%00', '//evil.test/x', 'file:///etc/passwd', 'https://example.test/kapsel/transfer/fs/content', '--output', 'fs\\..\\admin']) {
     assert.throws(() => validateEndpoint(value));
   }
   assert.equal(validateEndpoint('fs/query/list'), 'fs/query/list');
@@ -436,8 +436,13 @@ test('Python transport exercises real HTTP, dot paths, attribution, unicode and 
   await assert.rejects(tools.kapsel_http.execute({ method: 'GET', endpoint: 'redirect' }, context()), /302/);
   assert.ok(!calls.some(c => c.url === '/escaped'));
   const before = calls.length;
-  await assert.rejects(tools.kapsel_http.execute({ method: 'GET', endpoint: 'http://127.0.0.1:1/transfer/id' }, context()), /configured OpenKapsel origin/);
+  await assert.rejects(tools.kapsel_http.execute({ method: 'GET', endpoint: 'http://127.0.0.1:1/transfer/id' }, context()), /Absolute.*unsupported/);
+  await assert.rejects(tools.kapsel_http.execute({ method: 'GET', endpoint: `${url.slice(0, url.indexOf('/w/'))}/transfer/fs/content` }, context()), /Absolute.*unsupported/);
   assert.equal(calls.length, before);
+  // Defense in depth: even direct Python runner calls cannot attach control
+  // credentials to retired same-origin transfer aliases.
+  const dirBefore = join(stateRoot, (await readdir(stateRoot))[0]);
+  await assert.rejects(runHelper({ action: 'http', method: 'GET', endpoint: `${url.slice(0, url.indexOf('/w/'))}/transfer/fs/content` }, { cwd: dirBefore }), /absolute URLs are unsupported/);
   const directory = join(stateRoot, (await readdir(stateRoot))[0]);
   assert.match(await readFile(join(directory, '.openkapsel.env'), 'utf8'), /test_control/);
   await assert.rejects(tools.kapsel_status.execute({}, context('other-session')), /credential file/);
