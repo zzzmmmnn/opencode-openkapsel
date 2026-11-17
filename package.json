@@ -11,6 +11,7 @@
     "index.js",
     "lib/",
     "vendor/",
+    "v2/",
     "README.md"
   ],
   "scripts": {

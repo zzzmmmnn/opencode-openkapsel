@@ -366,3 +366,22 @@ See the bundled Context reference for direct-child limits and idempotency rules.
 ## OAuth browser consent is separate from this REST bridge
 
 OpenKapsel OAuth-capable MCP clients use the independent browser consent page. A user verifies ownership there with the current control token for the exact linked configuration; administrator login is not required. This plugin continues using its existing REST credentials and never submits them to a browser form or client callback. OAuth access/refresh credentials remain separate from REST credentials. Updating server consent does not require a new plugin transport or new tool. If you already have an authenticated OAuth or Static MCP connection on another platform, the server-side `credential_get` tool can export the current REST workspace URL/control token for configuring this plugin, and `credential_renew` can rotate that REST pair inside the normal renewal window without changing the MCP credential.
+
+
+## OpenCode v2 compatibility
+
+OpenCode v2 uses the plugin entrypoint in v2/index.js. The original
+index.js remains for OpenCode v1 compatibility. On v2, configure a local
+directory containing v2/index.js and v2/package.json in the plugins
+array (plural). Keep the shared lib/, vendor/ and node_modules/
+dependencies in its parent directory.
+
+The v2 entrypoint registers the original Kapsel tools through
+ctx.tool.transform and ports the remote-only guard, private session bridge,
+and permission requests to v2 hooks. Configure openkapsel and
+openkapsel-readonly primary agents, denying host tools and allowing Kapsel
+remote tools. For the readonly agent, kapsel_write requires approval.
+Do not configure the old v1-only root entrypoint in v2.
+
+Run node --test tests/*.test.js before deploying. The tests validate
+registration and isolation, but not model inference or live Kapsel access.
