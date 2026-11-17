@@ -1,6 +1,6 @@
 {
   "name": "opencode-openkapsel-v2",
-  "version": "0.4.0-test",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "index.js"
